@@ -11,33 +11,33 @@ st.set_page_config(page_title="OOIP Monte Carlo", layout="wide")
 st.title("OOIP Monte Carlo Estimator")
 
 # ------------------------------------------------------------------ #
-# 1. Upload & ultra-robust parsing (scientific notation + commas safe)
+# 1. Upload & CORRECTED parsing for your EXACT layout
 # ------------------------------------------------------------------ #
-uploaded = st.file_uploader(
-    "Upload reference file (CSV or Excel)", type=["csv", "xlsx", "xls"]
-)
+uploaded = st.file_uploader("Upload reference file (CSV or Excel)", type=["csv", "xlsx", "xls"])
 
 if uploaded:
-    # ---- read everything as TEXT ---------------------------------
+    # --- Read as strings to preserve scientific notation ---
     if uploaded.name.endswith(".csv"):
         raw = pd.read_csv(uploaded, header=None, dtype=str, na_filter=False)
     else:
         raw = pd.read_excel(uploaded, header=None, dtype=str, na_filter=False)
 
-    # ---- locate header (first row that contains "Porosity") -----
+    # --- Find header row ---
     header_row = None
     for i in range(len(raw)):
-        if raw.iloc[i].astype(str).str.lower().str.contains("porosity").any():
+        if "porosity" in raw.iloc[i].astype(str).str.lower().values:
             header_row = i
             break
     if header_row is None:
-        st.error("Could not find a row containing **Porosity**.")
+        st.error("Could not find header row with 'Porosity'.")
         st.stop()
 
+    # --- Extract rows ---
     header = raw.iloc[header_row].astype(str).str.strip()
-    data   = raw.iloc[header_row + 1 :].reset_index(drop=True).astype(str).applymap(str.strip)
+    meta_row = raw.iloc[header_row + 1].astype(str).str.strip()  # Row with min/max labels
+    data_rows = raw.iloc[header_row + 2 :].reset_index(drop=True).astype(str).applymap(str.strip)
 
-    # ---- map columns (case-insensitive, tolerant) ----------------
+    # --- Map columns ---
     col_map = {}
     header_low = header.str.lower()
 
@@ -56,57 +56,42 @@ if uploaded:
         elif "formation" in name or "bo" in name:
             col_map["Bo"] = idx
 
-    required = ["Porosity","Permeability_md","NetToGross",
-                "Gross_min","Gross_max","Swi","Bo"]
+    required = ["Porosity","Permeability_md","NetToGross","Gross_min","Gross_max","Swi","Bo"]
     missing = [k for k in required if k not in col_map]
     if missing:
         st.error(f"Missing columns: {', '.join(missing)}")
         st.stop()
 
-    # ---- helper: convert any string to float --------------------
+    # --- Safe float conversion ---
     def safe_float(s):
         try:
-            return float(str(s).replace(",", "").replace("\n","").replace("\r",""))
-        except Exception:
+            return float(str(s).replace(",", "").replace("\n","").replace("\r","").strip())
+        except:
             return np.nan
 
-    # ---- samples (all rows after header) -------------------------
-    porosity = pd.to_numeric(
-        data.iloc[:, col_map["Porosity"]].apply(safe_float), errors="coerce"
-    ).dropna().values
+    # --- Extract samples from data_rows (skip metadata) ---
+    porosity = pd.to_numeric(data_rows.iloc[:, col_map["Porosity"]].apply(safe_float), errors='coerce').dropna().values
+    ntg      = pd.to_numeric(data_rows.iloc[:, col_map["NetToGross"]].apply(safe_float), errors='coerce').dropna().values
 
-    perm = pd.to_numeric(
-        data.iloc[:, col_map["Permeability_md"]].apply(safe_float), errors="coerce"
-    ).dropna().values
+    # --- Extract Gross min/max from FIRST DATA ROW (Row 2 in original) ---
+    first_data = data_rows.iloc[0]
+    gross_min = safe_float(first_data.iloc[col_map["Gross_min"]])
+    gross_max = safe_float(first_data.iloc[col_map["Gross_max"]])
 
-    ntg = pd.to_numeric(
-        data.iloc[:, col_map["NetToGross"]].apply(safe_float), errors="coerce"
-    ).dropna().values
-
-    # ---- constants from first data row --------------------------
-    row0 = data.iloc[0]
-
-    gross_min = safe_float(row0.iloc[col_map["Gross_min"]])
-    gross_max = safe_float(row0.iloc[col_map["Gross_max"]])
-    swi       = safe_float(row0.iloc[col_map["Swi"]])
-    bo        = safe_float(row0.iloc[col_map["Bo"]])
+    # --- Extract Swi & Bo from METADATA ROW (Row 1) ---
+    swi = safe_float(meta_row.iloc[col_map["Swi"]])
+    bo  = safe_float(meta_row.iloc[col_map["Bo"]])
 
     if any(pd.isna(x) for x in [gross_min, gross_max, swi, bo]):
-        st.error(
-            "Could not read **Gross Volume**, **Swi**, or **Bo** from the first data row. "
-            "Check that the cells contain numbers (scientific notation, commas, etc. are fine)."
-        )
+        st.error("Failed to parse **Gross Volume**, **Swi**, or **Bo**. Check values in rows 2 and 3.")
         st.stop()
 
-    st.success("File parsed perfectly!")
-    st.write(
-        f"**Samples:** {len(porosity)} porosity, {len(ntg)} NTG  |  "
-        f"**Gross Vol:** {gross_min:,.2e} – {gross_max:,.2e} m³  |  "
-        f"**Swi:** {swi:.3f}  |  **Bo:** {bo:.3f}"
-    )
+    st.success("File parsed correctly!")
+    st.write(f"**Samples:** {len(porosity)} porosity, {len(ntg)} NTG")
+    st.write(f"**Gross Vol:** {gross_min:,.2e} – {gross_max:,.2e} m³ | **Swi:** {swi:.3f} | **Bo:** {bo:.3f}")
 
     # ------------------------------------------------------------------ #
-    # 2. Distribution detection (Porosity & NetToGross only)
+    # 2. Distribution detection
     # ------------------------------------------------------------------ #
     def best_distribution(samples, name):
         if len(samples) < 20:
@@ -175,7 +160,7 @@ if uploaded:
             return rng.choice(samples, size=size, replace=True)
 
         phi = np.clip(draw(phi_dist, porosity, iterations), 0, 1)
-        ntg = np.clip(draw(ntg_dist, ntg,      iterations), 0, 1)
+        ntg = np.clip(draw(ntg_dist, ntg, iterations), 0, 1)
         gross = rng.uniform(gross_min, gross_max, iterations)
 
         net_vol = gross * ntg * phi
@@ -188,7 +173,6 @@ if uploaded:
         # 5. Format numbers
         # ----------------------------------------------------------------
         fmt = f"{{:.{decimals}e}}"
-        fmt_num = lambda x: float(fmt.format(x))
 
         p10 = np.percentile(ooip, 90)
         p50 = np.percentile(ooip, 50)
