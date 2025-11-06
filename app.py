@@ -303,8 +303,13 @@ if uploaded:
 
             # P10/P50/P90 lines
             for val, label, color in [(p90, "P90", "#59a14f"), (p50, "P50", "#f28e2b"), (p10, "P10", "#e15759")]:
+                # Ascending CDF annotations
                 fig.add_vline(x=val, line=dict(dash="dash", color=color), annotation_text=f"{label}: {fmt.format(val)}", row=1, col=2)
-                fig.add_vline(x=val, line=dict(dash="dash", color=color), annotation_text=f"{label}: {fmt.format(val)}", row=2, col=1)
+                # Descending CDF annotations
+                fig.add_vline(x=val, line=dict(dash="dash", color=color), 
+                             annotation_text=f"{label}: {fmt.format(val)}", 
+                             annotation_position="top",
+                             row=2, col=1)
                 # Add invisible trace for legend
                 fig.add_trace(go.Scatter(
                     x=[val], y=[0.5], mode='markers+lines',
