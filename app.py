@@ -11,36 +11,37 @@ st.set_page_config(page_title="OOIP Monte Carlo", layout="wide")
 st.title("OOIP Monte Carlo Estimator")
 
 # ------------------------------------------------------------------ #
-# 1. Upload & robust parsing (FIXED for scientific notation)
+# 1. Upload & ultra-robust parsing (scientific notation + commas safe)
 # ------------------------------------------------------------------ #
-uploaded = st.file_uploader("Upload reference file (CSV or Excel)", type=["csv", "xlsx", "xls"])
+uploaded = st.file_uploader(
+    "Upload reference file (CSV or Excel)", type=["csv", "xlsx", "xls"]
+)
 
 if uploaded:
-    # --- Read ENTIRE file as strings to preserve "6.99E+08" ---
+    # ---- read everything as TEXT ---------------------------------
     if uploaded.name.endswith(".csv"):
         raw = pd.read_csv(uploaded, header=None, dtype=str, na_filter=False)
     else:
         raw = pd.read_excel(uploaded, header=None, dtype=str, na_filter=False)
 
-    # --- Find header row (contains "Porosity") ---
+    # ---- locate header (first row that contains "Porosity") -----
     header_row = None
     for i in range(len(raw)):
-        row_values = raw.iloc[i].astype(str).str.lower()
-        if row_values.str.contains("porosity").any():
+        if raw.iloc[i].astype(str).str.lower().str.contains("porosity").any():
             header_row = i
             break
     if header_row is None:
         st.error("Could not find a row containing **Porosity**.")
         st.stop()
 
-    header = raw.iloc[header_row].astype(str)
-    data   = raw.iloc[header_row+1:].reset_index(drop=True).astype(str)
+    header = raw.iloc[header_row].astype(str).str.strip()
+    data   = raw.iloc[header_row + 1 :].reset_index(drop=True).astype(str).applymap(str.strip)
 
-    # --- Map columns by keyword (case-insensitive, flexible) ---
+    # ---- map columns (case-insensitive, tolerant) ----------------
     col_map = {}
-    header_lower = header.str.lower().str.strip()
+    header_low = header.str.lower()
 
-    for idx, name in enumerate(header_lower):
+    for idx, name in enumerate(header_low):
         if "porosity" in name:
             col_map["Porosity"] = idx
         elif "permeability" in name:
@@ -49,44 +50,63 @@ if uploaded:
             col_map["NetToGross"] = idx
         elif "gross volume" in name or "gross vol" in name:
             col_map["Gross_min"] = idx
-            col_map["Gross_max"] = idx + 1  # assume min/max side-by-side
+            col_map["Gross_max"] = idx + 1
         elif "swi" in name:
             col_map["Swi"] = idx
         elif "formation" in name or "bo" in name:
             col_map["Bo"] = idx
 
-    required = ["Porosity", "Permeability_md", "NetToGross", "Gross_min", "Gross_max", "Swi", "Bo"]
+    required = ["Porosity","Permeability_md","NetToGross",
+                "Gross_min","Gross_max","Swi","Bo"]
     missing = [k for k in required if k not in col_map]
     if missing:
         st.error(f"Missing columns: {', '.join(missing)}")
         st.stop()
 
-    # --- Extract samples (rows 1+ after header) ---
-    def to_float(series):
-        return pd.to_numeric(series.str.replace(',', ''), errors='coerce')
+    # ---- helper: convert any string to float --------------------
+    def safe_float(s):
+        try:
+            return float(str(s).replace(",", "").replace("\n","").replace("\r",""))
+        except Exception:
+            return np.nan
 
-    porosity = to_float(data.iloc[:, col_map["Porosity"]]).dropna().values
-    perm     = to_float(data.iloc[:, col_map["Permeability_md"]]).dropna().values
-    ntg      = to_float(data.iloc[:, col_map["NetToGross"]]).dropna().values
+    # ---- samples (all rows after header) -------------------------
+    porosity = pd.to_numeric(
+        data.iloc[:, col_map["Porosity"]].apply(safe_float), errors="coerce"
+    ).dropna().values
 
-    # --- Extract min/max, Swi, Bo from FIRST data row ---
-    first_row = data.iloc[0]
+    perm = pd.to_numeric(
+        data.iloc[:, col_map["Permeability_md"]].apply(safe_float), errors="coerce"
+    ).dropna().values
 
-    gross_min = pd.to_numeric(str(first_row.iloc[col_map["Gross_min"]]).replace(',', ''), errors='coerce')
-    gross_max = pd.to_numeric(str(first_row.iloc[col_map["Gross_max"]]).replace(',', ''), errors='coerce')
-    swi       = pd.to_numeric(str(first_row.iloc[col_map["Swi"]]).replace(',', ''), errors='coerce')
-    bo        = pd.to_numeric(str(first_row.iloc[col_map["Bo"]]).replace(',', ''), errors='coerce')
+    ntg = pd.to_numeric(
+        data.iloc[:, col_map["NetToGross"]].apply(safe_float), errors="coerce"
+    ).dropna().values
+
+    # ---- constants from first data row --------------------------
+    row0 = data.iloc[0]
+
+    gross_min = safe_float(row0.iloc[col_map["Gross_min"]])
+    gross_max = safe_float(row0.iloc[col_map["Gross_max"]])
+    swi       = safe_float(row0.iloc[col_map["Swi"]])
+    bo        = safe_float(row0.iloc[col_map["Bo"]])
 
     if any(pd.isna(x) for x in [gross_min, gross_max, swi, bo]):
-        st.error("Failed to parse **Gross Volume**, **Swi**, or **Bo** from first data row. Check scientific notation and commas.")
+        st.error(
+            "Could not read **Gross Volume**, **Swi**, or **Bo** from the first data row. "
+            "Check that the cells contain numbers (scientific notation, commas, etc. are fine)."
+        )
         st.stop()
 
-    st.success("File parsed successfully!")
-    st.write(f"**Samples:** {len(porosity)} porosity, {len(ntg)} NTG")
-    st.write(f"**Gross Vol:** {gross_min:,.2e} – {gross_max:,.2e} m³ | **Swi:** {swi:.3f} | **Bo:** {bo:.3f}")
+    st.success("File parsed perfectly!")
+    st.write(
+        f"**Samples:** {len(porosity)} porosity, {len(ntg)} NTG  |  "
+        f"**Gross Vol:** {gross_min:,.2e} – {gross_max:,.2e} m³  |  "
+        f"**Swi:** {swi:.3f}  |  **Bo:** {bo:.3f}"
+    )
 
     # ------------------------------------------------------------------ #
-    # 2. Distribution detection
+    # 2. Distribution detection (Porosity & NetToGross only)
     # ------------------------------------------------------------------ #
     def best_distribution(samples, name):
         if len(samples) < 20:
