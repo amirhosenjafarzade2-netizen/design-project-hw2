@@ -6,36 +6,29 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 from io import BytesIO
-
 st.set_page_config(page_title="OOIP/STOIIP Monte Carlo", layout="wide")
 st.title("OOIP/STOIIP Monte Carlo Estimator")
 st.markdown("**Volumetric Hydrocarbon-in-Place Estimation Under Uncertainty**")
-
 # ------------------------------------------------------------------ #
 # 1. Upload & parsing
 # ------------------------------------------------------------------ #
 uploaded = st.file_uploader("Upload reservoir data file (CSV or Excel)", type=["csv", "xlsx", "xls"])
-
 if uploaded:
     if uploaded.name.endswith(".csv"):
         raw = pd.read_csv(uploaded, header=None, dtype=str, na_filter=False)
     else:
         raw = pd.read_excel(uploaded, header=None, dtype=str, na_filter=False)
-
     header_row = None
     for i in range(len(raw)):
         if "porosity" in raw.iloc[i].astype(str).str.lower().values:
             header_row = i
             break
-
     if header_row is None:
         st.error("Could not find header row with 'Porosity'.")
         st.stop()
-
     header = raw.iloc[header_row].astype(str).str.strip()
     meta_row = raw.iloc[header_row + 1].astype(str).str.strip()
     data_rows = raw.iloc[header_row + 2:].reset_index(drop=True).astype(str).apply(lambda x: x.str.strip())
-
     col_map = {}
     header_low = header.str.lower()
     for idx, name in enumerate(header_low):
@@ -52,39 +45,31 @@ if uploaded:
             col_map["Swi"] = idx
         elif "formation" in name or "fvf" in name or "bo" in name or "m3/sm3" in name:
             col_map["Bo"] = idx
-
     required = ["Porosity", "NetToGross", "Gross_min", "Gross_max", "Swi", "Bo"]
     missing = [k for k in required if k not in col_map]
     if missing:
         st.error(f"Missing required columns: {', '.join(missing)}")
         st.stop()
-
     def safe_float(s):
         try:
             return float(str(s).replace(",", "").replace("\n", "").replace("\r", "").strip())
         except:
             return np.nan
-
     porosity = pd.to_numeric(data_rows.iloc[:, col_map["Porosity"]].apply(safe_float), errors='coerce').dropna().values
     ntg = pd.to_numeric(data_rows.iloc[:, col_map["NetToGross"]].apply(safe_float), errors='coerce').dropna().values
     gross_min = safe_float(data_rows.iloc[0, col_map["Gross_min"]])
     gross_max = safe_float(data_rows.iloc[0, col_map["Gross_max"]])
     swi = safe_float(meta_row.iloc[col_map["Swi"]])
     bo = safe_float(meta_row.iloc[col_map["Bo"]])
-
     if any(pd.isna(x) for x in [gross_min, gross_max, swi, bo]):
         st.error("Failed to parse **Gross Volume**, **Swi**, or **Bo**.")
         st.stop()
-
     if len(porosity) < 10 or len(ntg) < 10:
         st.error(f"Need >=10 samples. Got: Porosity={len(porosity)}, N/G={len(ntg)}")
         st.stop()
-
     porosity = np.clip(porosity, 0, 1)
     ntg = np.clip(ntg, 0, 1)
-
     st.success(f"File parsed — {len(porosity)} valid samples")
-
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Porosity", f"{porosity.mean():.3f} ± {porosity.std():.3f}")
@@ -93,13 +78,11 @@ if uploaded:
     with col3:
         st.metric("GRV (m³)", f"{gross_min:.2e} – {gross_max:.2e}")
         st.write(f"Swi: {swi:.3f} | Bo: {bo:.3f}")
-
     # ------------------------------------------------------------------ #
     # 2. Auto-detect distributions for Porosity & N/G
     # ------------------------------------------------------------------ #
     st.markdown("---")
     st.subheader("Detected Input Distributions")
-
     def detect_distribution(samples, name):
         if len(samples) < 15:
             return "Triangular", "Too few samples → using Triangular"
@@ -126,22 +109,18 @@ if uploaded:
         if best == "Triangular" and tests[best] < 0.05:
             reason += " (fallback)"
         return best, reason
-
     phi_dist, phi_reason = detect_distribution(porosity, "Porosity")
     ntg_dist, ntg_reason = detect_distribution(ntg, "NetToGross")
-
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(f"**Porosity (ϕ):** `{phi_dist}` \n_{phi_reason}_")
     with col2:
         st.markdown(f"**Net-to-Gross (N/G):** `{ntg_dist}` \n_{ntg_reason}_")
-
     # ------------------------------------------------------------------ #
     # 3. Volumetric Formula (UI Only)
     # ------------------------------------------------------------------ #
     st.markdown("---")
     st.latex(r"\text{STOIIP} = \frac{\text{GRV} \times \text{N/G} \times \phi \times (1 - S_{wi})}{B_o}")
-
     # ------------------------------------------------------------------ #
     # 4. User Controls
     # ------------------------------------------------------------------ #
@@ -154,11 +133,9 @@ if uploaded:
         output_unit = st.radio("Output units", ["Stock Tank m³", "Barrels (STB)"], horizontal=True)
     with col3:
         plot_engine = st.radio("Plotting engine", ["Plotly (interactive)", "Matplotlib (static)"], index=1, horizontal=True)
-
     st.markdown("**Gross Rock Volume (GRV) Distribution**")
     grv_dist = st.selectbox("Select GRV distribution", ["Uniform", "Triangular", "Normal"], index=0)
     decimals = st.slider("Decimal places on charts & results", 0, 6, 3)
-
     # ------------------------------------------------------------------ #
     # 5. Run Simulation
     # ------------------------------------------------------------------ #
@@ -167,7 +144,6 @@ if uploaded:
             rng = np.random.default_rng()
             gmin = gross_min
             gmax = gross_max
-
             def draw(dist, data, size, rng_instance):
                 if dist == "Normal":
                     mu, sigma = stats.norm.fit(data)
@@ -182,10 +158,8 @@ if uploaded:
                         mode = (data.min() + data.max()) / 2
                         return rng_instance.triangular(data.min(), mode, data.max(), size)
                 return rng_instance.choice(data, size=size, replace=True)
-
             phi = np.clip(draw(phi_dist, porosity, iterations, rng), 0.001, 0.99)
             ntg = np.clip(draw(ntg_dist, ntg, iterations, rng), 0.001, 1.0)
-
             if grv_dist == "Uniform":
                 grv = rng.uniform(gmin, gmax, iterations)
             elif grv_dist == "Triangular":
@@ -195,29 +169,24 @@ if uploaded:
                 mean = (gmin + gmax) / 2
                 std = (gmax - gmin) / 6
                 grv = np.clip(rng.normal(mean, std, iterations), gmin, gmax)
-
             net_vol = grv * ntg
             hc_vol = net_vol * phi * (1 - swi)
             stoiip_m3 = hc_vol / bo
             stoiip = stoiip_m3 * (6.289811 if output_unit.startswith("Barrels") else 1)
             unit = "STB" if "Barrels" in output_unit else "m³"
-
-            # CORRECTED: P10 = 90th, P90 = 10th (industry standard)
-            p10 = np.percentile(stoiip, 90)  # High estimate (exceeded 10% of time)
-            p50 = np.percentile(stoiip, 50)  # Median
-            p90 = np.percentile(stoiip, 10)  # Low estimate (exceeded 90% of time)
-
+            # FIXED: Swap percentiles so P10 < P50 < P90 in cumulative charts
+            p10 = np.percentile(stoiip, 10)
+            p50 = np.percentile(stoiip, 50)
+            p90 = np.percentile(stoiip, 90)
         st.success("Simulation Complete!")
-
         # ----------------------------------------------------------------
         # 6. Results
         # ----------------------------------------------------------------
         fmt = f"{{:.{decimals}e}}"
         col1, col2, col3 = st.columns(3)
-        col1.metric("P10 (High)", f"{fmt.format(p10)} {unit}")
+        col1.metric("P10 (Low)", f"{fmt.format(p10)} {unit}")
         col2.metric("P50 (Median)", f"{fmt.format(p50)} {unit}")
-        col3.metric("P90 (Low)", f"{fmt.format(p90)} {unit}")
-
+        col3.metric("P90 (High)", f"{fmt.format(p90)} {unit}")
         # --------------------------------------------------------------
         # NEW: Show ONE random Monte-Carlo realisation
         # --------------------------------------------------------------
@@ -226,7 +195,6 @@ if uploaded:
         example_rng = np.random.default_rng(42)
         phi_ex = np.clip(draw(phi_dist, porosity, 1, example_rng), 0.001, 0.99)[0]
         ntg_ex = np.clip(draw(ntg_dist, ntg, 1, example_rng), 0.001, 1.0)[0]
-
         if grv_dist == "Uniform":
             grv_ex = example_rng.uniform(gmin, gmax)
         elif grv_dist == "Triangular":
@@ -236,12 +204,10 @@ if uploaded:
             mean = (gmin + gmax) / 2
             std = (gmax - gmin) / 6
             grv_ex = np.clip(example_rng.normal(mean, std), gmin, gmax)
-
         net_vol_ex = grv_ex * ntg_ex
         hc_vol_ex = net_vol_ex * phi_ex * (1 - swi)
         stoiip_m3_ex = hc_vol_ex / bo
         stoiip_ex = stoiip_m3_ex * (6.289811 if output_unit.startswith("Barrels") else 1)
-
         st.latex(
             rf"\text{{STOIIP}} = \dfrac{{{grv_ex:.2e}\;\times\;{ntg_ex:.4f}\;\times\;{phi_ex:.4f}"
             rf"\;\times\;({1-swi:.4f})}}{{{bo:.4f}}}"
@@ -260,7 +226,6 @@ if uploaded:
             f"4. STOIIP ({unit}) = {stoiip_m3_ex:.2e} × {6.289811 if 'Barrels' in output_unit else 1:.6f} = **{stoiip_ex:.{decimals}e}** {unit}",
             unsafe_allow_html=True
         )
-
         # ----------------------------------------------------------------
         # 7. Plots: Individual High-Res Downloads
         # ----------------------------------------------------------------
@@ -269,13 +234,12 @@ if uploaded:
         sorted_val = np.sort(stoiip)
         cdf_y = np.linspace(0, 1, len(sorted_val))
         exceedance = 1 - cdf_y
-
+        # Helper to save figure to PNG in memory
         def fig_to_png(fig):
             buf = BytesIO()
             fig.savefig(buf, format='png', dpi=300, bbox_inches='tight')
             buf.seek(0)
             return buf
-
         if "Plotly" in plot_engine:
             fig = make_subplots(
                 rows=2, cols=2,
@@ -291,13 +255,7 @@ if uploaded:
             fig.add_trace(go.Scatter(x=sorted_val, y=cdf_y, mode="lines", line=dict(color="#f28e2b", width=3), showlegend=False), row=1, col=2)
             fig.add_trace(go.Scatter(x=sorted_val, y=exceedance, mode="lines", line=dict(color="#59a14f", width=3), name="Exceedance", showlegend=False), row=2, col=1)
             fig.add_trace(go.Histogram(x=stoiip, nbinsx=80, name="Log", marker_color="#e15759", showlegend=False), row=2, col=2)
-
-            # CORRECTED ORDER: P10 (high), P50, P90 (low)
-            for val, label, color in [
-                (p10, "P10", "#e15759"),  # Red = High
-                (p50, "P50", "#f28e2b"),  # Orange = Median
-                (p90, "P90", "#59a14f")   # Green = Low
-            ]:
+            for val, label, color in [(p10, "P10", "#59a14f"), (p50, "P50", "#f28e2b"), (p90, "P90", "#e15759")]:
                 val_str = fmt.format(val)
                 fig.add_vline(x=val, line=dict(dash="dash", color=color),
                               annotation_text=f"{label}: {val_str}", row=1, col=2)
@@ -307,21 +265,13 @@ if uploaded:
                 fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines',
                                         line=dict(dash='dash', color=color),
                                         name=f"{label}: {val_str} {unit}", showlegend=True))
-
             fig.update_layout(height=900,
                               legend=dict(orientation="h", yanchor="top", y=-0.05, xanchor="left", x=0.0,
                                           bgcolor="rgba(255,255,255,0.8)", bordercolor="black", borderwidth=1))
             fig.update_xaxes(tickformat=f".{decimals}e")
             fig.update_xaxes(type="log", row=2, col=2)
             st.plotly_chart(fig, use_container_width=True)
-
-            st.caption(
-                "Descending CDF shows **exceedance probability**: "
-                "P10 = value exceeded in 10% of realizations (high case), "
-                "P90 = exceeded in 90% (low case)."
-            )
-
-        else:  # Matplotlib — 4 separate high-res downloadable plots
+        else: # Matplotlib — now 4 separate high-res downloadable plots
             # Plot 1: Histogram
             fig1, ax1 = plt.subplots(figsize=(8, 6), dpi=300)
             ax1.hist(stoiip, bins=80, color="#4e79a7", edgecolor="black")
@@ -331,43 +281,32 @@ if uploaded:
             st.pyplot(fig1)
             buf1 = fig_to_png(fig1)
             st.download_button("Download Histogram", buf1, "histogram.png", "image/png")
-
             # Plot 2: Ascending CDF
             fig2, ax2 = plt.subplots(figsize=(8, 6), dpi=300)
             ax2.plot(sorted_val, cdf_y, color="#f28e2b", lw=3)
             ax2.set_title("Ascending CDF")
             ax2.set_xlabel(f"STOIIP ({unit})")
             ax2.set_ylabel("Cumulative Probability")
-            for val, label, color in [
-                (p10, "P10", "#e15759"),
-                (p50, "P50", "#f28e2b"),
-                (p90, "P90", "#59a14f")
-            ]:
+            for val, label, color in [(p10, "P10", "#59a14f"), (p50, "P50", "#f28e2b"), (p90, "P90", "#e15759")]:
                 val_str = f"{val:.{decimals}e}"
                 ax2.axvline(val, color=color, linestyle="--", linewidth=1.5)
                 ax2.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
             st.pyplot(fig2)
             buf2 = fig_to_png(fig2)
             st.download_button("Download Ascending CDF", buf2, "ascending_cdf.png", "image/png")
-
             # Plot 3: Descending CDF
             fig3, ax3 = plt.subplots(figsize=(8, 6), dpi=300)
             ax3.plot(sorted_val, exceedance, color="#59a14f", lw=3)
             ax3.set_title("Descending CDF (Exceedance)")
             ax3.set_xlabel(f"STOIIP ({unit})")
             ax3.set_ylabel("Exceedance Probability")
-            for val, label, color in [
-                (p10, "P10", "#e15759"),
-                (p50, "P50", "#f28e2b"),
-                (p90, "P90", "#59a14f")
-            ]:
+            for val, label, color in [(p10, "P10", "#59a14f"), (p50, "P50", "#f28e2b"), (p90, "P90", "#e15759")]:
                 val_str = f"{val:.{decimals}e}"
                 ax3.axvline(val, color=color, linestyle="--", linewidth=1.5)
                 ax3.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
             st.pyplot(fig3)
             buf3 = fig_to_png(fig3)
             st.download_button("Download Descending CDF", buf3, "descending_cdf.png", "image/png")
-
             # Plot 4: Log Histogram
             fig4, ax4 = plt.subplots(figsize=(8, 6), dpi=300)
             ax4.hist(stoiip, bins=80, color="#e15759", edgecolor="black", log=True)
@@ -377,9 +316,8 @@ if uploaded:
             st.pyplot(fig4)
             buf4 = fig_to_png(fig4)
             st.download_button("Download Log Histogram", buf4, "log_histogram.png", "image/png")
-
+            # Close all figures to free memory
             plt.close('all')
-
         # ----------------------------------------------------------------
         # 8. Download Results
         # ----------------------------------------------------------------
@@ -390,14 +328,12 @@ if uploaded:
             "GRV (m³)": grv.astype(int)
         })
         st.download_button("Download Results CSV", results_df.to_csv(index=False), "monte_carlo_results.csv")
-
         st.download_button("Download Summary", f"""
-P10 (High): {fmt.format(p10)} {unit}
+P10 (Low): {fmt.format(p10)} {unit}
 P50 (Median): {fmt.format(p50)} {unit}
-P90 (Low): {fmt.format(p90)} {unit}
+P90 (High): {fmt.format(p90)} {unit}
 ϕ ~ {phi_dist} | N/G ~ {ntg_dist} | GRV ~ {grv_dist}
 Iterations: {iterations:,}
 """, "summary.txt")
-
 else:
     st.info("Upload your reservoir CSV/Excel file to begin.")
