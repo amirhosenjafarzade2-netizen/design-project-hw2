@@ -32,7 +32,7 @@ if uploaded:
 
     header = raw.iloc[header_row].astype(str).str.strip()
     meta_row = raw.iloc[header_row + 1].astype(str).str.strip()
-    data_rows = raw.iloc[header_row + 2:].reset_index(drop=True).astype(str).applymap(str.strip)
+    data_rows = raw.iloc[header_row + 2:].reset_index(drop=True).astype(str).apply(lambda x: x.str.strip())
 
     col_map = {}
     header_low = header.str.lower()
@@ -102,17 +102,26 @@ if uploaded:
         if len(samples) < 15:
             return "Triangular", "Too few samples → using Triangular"
         tests = {}
-        _, p_norm = stats.shapiro(samples)
-        tests["Normal"] = p_norm
-        u = (samples - samples.min()) / (samples.max() - samples.min() + 1e-12)
-        _, p_uni = stats.kstest(u, "uniform")
-        tests["Uniform"] = p_uni
+        try:
+            _, p_norm = stats.shapiro(samples)
+            tests["Normal"] = p_norm
+        except:
+            tests["Normal"] = 0
+        
+        try:
+            u = (samples - samples.min()) / (samples.max() - samples.min() + 1e-12)
+            _, p_uni = stats.kstest(u, "uniform")
+            tests["Uniform"] = p_uni
+        except:
+            tests["Uniform"] = 0
+        
         try:
             c, loc, scale = stats.triang.fit(samples)
             _, p_tri = stats.kstest(samples, stats.triang.cdf, args=(c, loc, scale))
             tests["Triangular"] = p_tri
         except:
             tests["Triangular"] = 0
+        
         best = max(tests, key=tests.get)
         reason = f"Best p-value: {tests[best]:.4f}"
         if best == "Triangular" and tests[best] < 0.05:
@@ -164,19 +173,24 @@ if uploaded:
             gmin = gross_min
             gmax = gross_max
 
-            def draw(dist, data, size):
+            def draw(dist, data, size, rng_instance):
                 if dist == "Normal":
                     mu, sigma = stats.norm.fit(data)
-                    return rng.normal(mu, sigma, size)
+                    return rng_instance.normal(mu, sigma, size)
                 if dist == "Uniform":
-                    return rng.uniform(data.min(), data.max(), size)
+                    return rng_instance.uniform(data.min(), data.max(), size)
                 if dist == "Triangular":
-                    c, loc, scale = stats.triang.fit(data)
-                    return stats.triang.rvs(c, loc, scale, size=size, random_state=rng)
-                return rng.choice(data, size=size, replace=True)
+                    try:
+                        c, loc, scale = stats.triang.fit(data)
+                        return stats.triang.rvs(c, loc, scale, size=size, random_state=rng_instance)
+                    except:
+                        # Fallback to simple triangular
+                        mode = (data.min() + data.max()) / 2
+                        return rng_instance.triangular(data.min(), mode, data.max(), size)
+                return rng_instance.choice(data, size=size, replace=True)
 
-            phi = np.clip(draw(phi_dist, porosity, iterations), 0.001, 0.99)
-            ntg = np.clip(draw(ntg_dist, ntg, iterations), 0.001, 1.0)
+            phi = np.clip(draw(phi_dist, porosity, iterations, rng), 0.001, 0.99)
+            ntg = np.clip(draw(ntg_dist, ntg, iterations, rng), 0.001, 1.0)
 
             if grv_dist == "Uniform":
                 grv = rng.uniform(gmin, gmax, iterations)
@@ -217,8 +231,8 @@ if uploaded:
 
         # Use a fixed seed for reproducibility of the example
         example_rng = np.random.default_rng(42)
-        phi_ex = np.clip(draw(phi_dist, porosity, 1), 0.001, 0.99)[0]
-        ntg_ex = np.clip(draw(ntg_dist, ntg, 1), 0.001, 1.0)[0]
+        phi_ex = np.clip(draw(phi_dist, porosity, 1, example_rng), 0.001, 0.99)[0]
+        ntg_ex = np.clip(draw(ntg_dist, ntg, 1, example_rng), 0.001, 1.0)[0]
 
         if grv_dist == "Uniform":
             grv_ex = example_rng.uniform(gmin, gmax)
@@ -253,7 +267,8 @@ if uploaded:
             f"1. Net volume = GRV × N/G = {grv_ex:.2e} × {ntg_ex:.4f} = **{net_vol_ex:.2e}** m³  \n"
             f"2. HC volume  = Net × ϕ × (1-S<sub>wi</sub>) = {net_vol_ex:.2e} × {phi_ex:.4f} × {1-swi:.4f} = **{hc_vol_ex:.2e}** m³  \n"
             f"3. STOIIP (m³) = HC / B<sub>o</sub> = {hc_vol_ex:.2e} / {bo:.4f} = **{stoiip_m3_ex:.2e}** m³  \n"
-            f"4. STOIIP ({unit}) = {stoiip_m3_ex:.2e} × {6.289811 if 'Barrels' in output_unit else 1:.6f} = **{stoiip_ex:.{decimals}e}** {unit}"
+            f"4. STOIIP ({unit}) = {stoiip_m3_ex:.2e} × {6.289811 if 'Barrels' in output_unit else 1:.6f} = **{stoiip_ex:.{decimals}e}** {unit}",
+            unsafe_allow_html=True
         )
 
         # ----------------------------------------------------------------
