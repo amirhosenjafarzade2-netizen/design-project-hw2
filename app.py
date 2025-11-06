@@ -15,7 +15,6 @@ st.markdown("**Volumetric Hydrocarbon-in-Place Estimation Under Uncertainty**")
 # 1. Upload & parsing
 # ------------------------------------------------------------------ #
 uploaded = st.file_uploader("Upload reservoir data file (CSV or Excel)", type=["csv", "xlsx", "xls"])
-
 if uploaded:
     if uploaded.name.endswith(".csv"):
         raw = pd.read_csv(uploaded, header=None, dtype=str, na_filter=False)
@@ -83,6 +82,7 @@ if uploaded:
     ntg = np.clip(ntg, 0, 1)
 
     st.success(f"File parsed — {len(porosity)} valid samples")
+
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Porosity", f"{porosity.mean():.3f} ± {porosity.std():.3f}")
@@ -101,7 +101,6 @@ if uploaded:
     def detect_distribution(samples, name):
         if len(samples) < 15:
             return "Triangular", "Too few samples → using Triangular"
-
         tests = {}
         _, p_norm = stats.shapiro(samples)
         tests["Normal"] = p_norm
@@ -114,7 +113,6 @@ if uploaded:
             tests["Triangular"] = p_tri
         except:
             tests["Triangular"] = 0
-
         best = max(tests, key=tests.get)
         reason = f"Best p-value: {tests[best]:.4f}"
         if best == "Triangular" and tests[best] < 0.05:
@@ -126,9 +124,9 @@ if uploaded:
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown(f"**Porosity (ϕ):** `{phi_dist}`  \n_{phi_reason}_")
+        st.markdown(f"**Porosity (ϕ):** `{phi_dist}` \n_{phi_reason}_")
     with col2:
-        st.markdown(f"**Net-to-Gross (N/G):** `{ntg_dist}`  \n_{ntg_reason}_")
+        st.markdown(f"**Net-to-Gross (N/G):** `{ntg_dist}` \n_{ntg_reason}_")
 
     # ------------------------------------------------------------------ #
     # 3. Volumetric Formula (UI Only)
@@ -141,7 +139,6 @@ if uploaded:
     # ------------------------------------------------------------------ #
     st.markdown("---")
     st.subheader("Simulation Settings")
-
     col1, col2, col3 = st.columns(3)
     with col1:
         iterations = st.slider("Monte Carlo iterations", 10000, 100000, 20000, 1000)
@@ -212,6 +209,53 @@ if uploaded:
         col2.metric("P50 (Median)", f"{fmt.format(p50)} {unit}")
         col3.metric("P90 (Low)", f"{fmt.format(p90)} {unit}")
 
+        # --------------------------------------------------------------
+        # NEW: Show ONE random Monte-Carlo realisation
+        # --------------------------------------------------------------
+        st.markdown("---")
+        st.subheader("Example of One Random Realisation")
+
+        # Use a fixed seed for reproducibility of the example
+        example_rng = np.random.default_rng(42)
+        phi_ex = np.clip(draw(phi_dist, porosity, 1), 0.001, 0.99)[0]
+        ntg_ex = np.clip(draw(ntg_dist, ntg, 1), 0.001, 1.0)[0]
+
+        if grv_dist == "Uniform":
+            grv_ex = example_rng.uniform(gmin, gmax)
+        elif grv_dist == "Triangular":
+            mode = (gmin + gmax) / 2
+            grv_ex = example_rng.triangular(gmin, mode, gmax)
+        else:   # Normal
+            mean = (gmin + gmax) / 2
+            std = (gmax - gmin) / 6
+            grv_ex = np.clip(example_rng.normal(mean, std), gmin, gmax)
+
+        net_vol_ex = grv_ex * ntg_ex
+        hc_vol_ex  = net_vol_ex * phi_ex * (1 - swi)
+        stoiip_m3_ex = hc_vol_ex / bo
+        stoiip_ex = stoiip_m3_ex * (6.289811 if output_unit.startswith("Barrels") else 1)
+
+        # LaTeX formula with numbers plugged in
+        st.latex(
+            rf"\text{{STOIIP}} = \dfrac{{{grv_ex:.2e}\;\times\;{ntg_ex:.4f}\;\times\;{phi_ex:.4f}"
+            rf"\;\times\;({1-swi:.4f})}}{{{bo:.4f}}}"
+            rf"\;=\;{stoiip_ex:.{decimals}e}\;{unit}"
+        )
+
+        # Step-by-step written calculation
+        st.markdown(
+            f"**Step-by-step calculation for this random draw:**  \n"
+            f"- GRV = `{grv_ex:.2e}` m³  \n"
+            f"- N/G = `{ntg_ex:.4f}`  \n"
+            f"- ϕ   = `{phi_ex:.4f}`  \n"
+            f"- (1 - S<sub>wi</sub>) = `{1-swi:.4f}`  \n"
+            f"- B<sub>o</sub> = `{bo:.4f}`  \n\n"
+            f"1. Net volume = GRV × N/G = {grv_ex:.2e} × {ntg_ex:.4f} = **{net_vol_ex:.2e}** m³  \n"
+            f"2. HC volume  = Net × ϕ × (1-S<sub>wi</sub>) = {net_vol_ex:.2e} × {phi_ex:.4f} × {1-swi:.4f} = **{hc_vol_ex:.2e}** m³  \n"
+            f"3. STOIIP (m³) = HC / B<sub>o</sub> = {hc_vol_ex:.2e} / {bo:.4f} = **{stoiip_m3_ex:.2e}** m³  \n"
+            f"4. STOIIP ({unit}) = {stoiip_m3_ex:.2e} × {6.289811 if 'Barrels' in output_unit else 1:.6f} = **{stoiip_ex:.{decimals}e}** {unit}"
+        )
+
         # ----------------------------------------------------------------
         # 7. Plots: Histogram + Ascending CDF + Descending CDF
         # ----------------------------------------------------------------
@@ -232,16 +276,12 @@ if uploaded:
                     "Log-Scale Histogram"
                 )
             )
-
             # Histogram
             fig.add_trace(go.Histogram(x=stoiip, nbinsx=80, name="STOIIP", marker_color="#4e79a7"), row=1, col=1)
-
             # Ascending CDF
             fig.add_trace(go.Scatter(x=sorted_val, y=cdf_y, mode="lines", line=dict(color="#f28e2b", width=3)), row=1, col=2)
-
             # Descending CDF
             fig.add_trace(go.Scatter(x=sorted_val, y=exceedance, mode="lines", line=dict(color="#59a14f", width=3)), row=2, col=1)
-
             # Log Histogram
             fig.add_trace(go.Histogram(x=stoiip, nbinsx=80, name="Log", marker_color="#e15759"), row=2, col=2)
 
@@ -254,28 +294,23 @@ if uploaded:
             fig.update_xaxes(tickformat=f".{decimals}e")
             fig.update_xaxes(type="log", row=2, col=2)
             st.plotly_chart(fig, use_container_width=True)
-
         else:  # Matplotlib
             fig, axs = plt.subplots(2, 2, figsize=(14, 10))
-
             # Histogram
             axs[0,0].hist(stoiip, bins=80, color="#4e79a7", edgecolor="black")
             axs[0,0].set_title("Histogram")
             axs[0,0].set_xlabel(f"STOIIP ({unit})")
             axs[0,0].set_ylabel("Frequency")
-
             # Ascending CDF
             axs[0,1].plot(sorted_val, cdf_y, color="#f28e2b", lw=3)
             axs[0,1].set_title("Ascending CDF")
             axs[0,1].set_xlabel(f"STOIIP ({unit})")
             axs[0,1].set_ylabel("Cumulative Probability")
-
             # Descending CDF
             axs[1,0].plot(sorted_val, exceedance, color="#59a14f", lw=3)
             axs[1,0].set_title("Descending CDF (Exceedance)")
             axs[1,0].set_xlabel(f"STOIIP ({unit})")
             axs[1,0].set_ylabel("Exceedance Probability")
-
             # Log Histogram
             axs[1,1].hist(stoiip, bins=80, color="#e15759", edgecolor="black", log=True)
             axs[1,1].set_title("Log-Scale Histogram")
