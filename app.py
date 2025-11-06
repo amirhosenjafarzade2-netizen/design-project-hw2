@@ -6,7 +6,6 @@ from scipy import stats
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 st.set_page_config(page_title="OOIP/STOIIP Monte Carlo", layout="wide")
 st.title("OOIP/STOIIP Monte Carlo Estimator")
@@ -77,7 +76,7 @@ if uploaded:
         st.stop()
 
     if len(porosity) < 10 or len(ntg) < 10:
-        st.error(f"Need ≥10 samples. Got: Porosity={len(porosity)}, N/G={len(ntg)}")
+        st.error(f"Need >=10 samples. Got: Porosity={len(porosity)}, N/G={len(ntg)}")
         st.stop()
 
     porosity = np.clip(porosity, 0, 1)
@@ -102,7 +101,7 @@ if uploaded:
     def detect_distribution(samples, name):
         if len(samples) < 15:
             return "Triangular", "Too few samples → using Triangular"
-        
+
         tests = {}
         # Normal
         _, p_norm = stats.shapiro(samples)
@@ -247,20 +246,23 @@ if uploaded:
             fig.update_layout(height=800, showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
-        else:  # Matplotlib
-            sns.set_style("whitegrid")
-            fig, axs = plt.subplots(2, 2, figsize=(14, 10))
-            axs[0,0].hist(stoiip, bins=80, color='skyblue', edgecolor='black')
+        else:  # Matplotlib (no seaborn)
+            plt.rcParams.update({"figure.figsize": (14, 10), "axes.grid": True, "grid.linestyle": "--"})
+            fig, axs = plt.subplots(2, 2)
+
+            axs[0,0].hist(stoiip, bins=80, color="#87CEEB", edgecolor="black")
             axs[0,0].set_title("Histogram")
-            axs[0,1].plot(sorted_val, cdf_y, color='blue', lw=2)
+            axs[0,1].plot(sorted_val, cdf_y, color="tab:blue", lw=2)
             axs[0,1].set_title("Ascending CDF")
-            axs[1,0].plot(sorted_val, 1-cdf_y, color='green', lw=2)
+            axs[1,0].plot(sorted_val, 1-cdf_y, color="tab:green", lw=2)
             axs[1,0].set_title("Descending CDF")
-            axs[1,1].hist(stoiip, bins=80, color='lightcoral', edgecolor='black', log=True)
+            axs[1,1].hist(stoiip, bins=80, color="#F08080", edgecolor="black", log=True)
             axs[1,1].set_title("Log Histogram")
-            for val, label, colr in [(p90, "P90", "green"), (p50, "P50", "blue"), (p10, "P10", "red")]:
-                axs[0,1].axvline(val, color=colr, linestyle="--", label=label)
-                axs[1,0].axvline(val, color=colr, linestyle="--")
+
+            for val, label, colr in [(p90, "P90", "tab:green"), (p50, "P50", "tab:blue"), (p10, "P10", "tab:red")]:
+                axs[0,1].axvline(val, color=colr, linestyle="--", linewidth=1.5)
+                axs[1,0].axvline(val, color=colr, linestyle="--", linewidth=1.5)
+
             plt.tight_layout()
             st.pyplot(fig)
 
