@@ -310,7 +310,8 @@ if uploaded:
                                         name=f"{label}: {fmt.format(val)} {unit}",
                                         showlegend=True), row=2, col=1)
 
-            fig.update_layout(height=800, showlegend=False)
+            fig.update_layout(height=900, showlegend=True, 
+                            legend=dict(orientation="h", yanchor="top", y=0.47, xanchor="center", x=0.25))
             fig.update_xaxes(tickformat=f".{decimals}e")
             fig.update_xaxes(type="log", row=2, col=2)
             st.plotly_chart(fig, use_container_width=True)
