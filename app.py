@@ -125,7 +125,7 @@ if uploaded:
     with col1:
         st.markdown(f"**Porosity (ϕ):** `{phi_dist}` \n_{phi_reason}_")
     with col2:
-        st.markdown(f"**Net-to-Gross (N/G):** `{ntg_dist}` \n_{ntg_reason}_")
+        st.markdown(f"**Net-to-Gross (N/G):** `{ntg_dist}` \n_{phi_reason}_")
 
     # ------------------------------------------------------------------ #
     # 3. Volumetric Formula (UI Only)
@@ -144,13 +144,10 @@ if uploaded:
     with col2:
         output_unit = st.radio("Output units", ["Stock Tank m³", "Barrels (STB)"], horizontal=True)
     with col3:
-        # Pre-select Matplotlib (index=1)
         plot_engine = st.radio("Plotting engine", ["Plotly (interactive)", "Matplotlib (static)"], index=1, horizontal=True)
 
-    # GRV distribution
     st.markdown("**Gross Rock Volume (GRV) Distribution**")
     grv_dist = st.selectbox("Select GRV distribution", ["Uniform", "Triangular", "Normal"], index=0)
-    # Decimal places
     decimals = st.slider("Decimal places on charts & results", 0, 6, 3)
 
     # ------------------------------------------------------------------ #
@@ -185,7 +182,7 @@ if uploaded:
             elif grv_dist == "Triangular":
                 mode = (gmin + gmax) / 2
                 grv = rng.triangular(gmin, mode, gmax, iterations)
-            else:  # Normal
+            else:
                 mean = (gmin + gmax) / 2
                 std = (gmax - gmin) / 6
                 grv = np.clip(rng.normal(mean, std, iterations), gmin, gmax)
@@ -280,24 +277,17 @@ if uploaded:
             fig.add_trace(go.Scatter(x=sorted_val, y=exceedance, mode="lines", line=dict(color="#59a14f", width=3), name="Exceedance", showlegend=False), row=2, col=1)
             fig.add_trace(go.Histogram(x=stoiip, nbinsx=80, name="Log", marker_color="#e15759", showlegend=False), row=2, col=2)
 
-            # Fixed annotations with correct y-positioning
-            percentiles = [
-                (p90, "P90", 0.90, "#59a14f"),
-                (p50, "P50", 0.50, "#f28e2b"),
-                (p10, "P10", 0.10, "#e15759")
-            ]
-            for val, label, prob, color in percentiles:
+            for val, label, color in [(p90, "P90", "#59a14f"), (p50, "P50", "#f28e2b"), (p10, "P10", "#e15759")]:
                 val_str = fmt.format(val)
                 # Ascending CDF
                 fig.add_vline(x=val, line=dict(dash="dash", color=color),
                               annotation_text=f"{label}: {val_str}", row=1, col=2)
-                # Descending CDF: vertical line + annotation at correct y
-                fig.add_vline(x=val, line=dict(dash="dash", color=color), row=2, col=1)
-                fig.add_annotation(x=val, y=prob, text=f"{label}: {val_str}",
-                                   showarrow=False, yshift=10, font=dict(color=color),
-                                   row=2, col=1)
+                # Descending CDF — same style as ascending
+                fig.add_vline(x=val, line=dict(dash="dash", color=color),
+                              annotation_text=f"{label}: {val_str}",
+                              annotation_position="top",
+                              row=2, col=1)
 
-                # Legend entry
                 fig.add_trace(go.Scatter(
                     x=[None], y=[None], mode='lines',
                     line=dict(dash='dash', color=color),
@@ -334,21 +324,15 @@ if uploaded:
             axs[1,1].set_xlabel(f"STOIIP ({unit})")
             axs[1,1].set_xscale("log")
 
-            # P10/P50/P90 markers (now correct on both CDFs)
-            for val, label, color, cdf_y_pos, exc_y_pos in [
-                (p90, "P90", "#59a14f", 0.10, 0.90),
-                (p50, "P50", "#f28e2b", 0.50, 0.50),
-                (p10, "P10", "#e15759", 0.90, 0.10)
-            ]:
+            # Same style as original ascending CDF: vertical line + rotated text
+            for val, label, color in [(p90, "P90", "#59a14f"), (p50, "P50", "#f28e2b"), (p10, "P10", "#e15759")]:
                 val_str = f"{val:.{decimals}e}"
                 # Ascending CDF
                 axs[0,1].axvline(val, color=color, linestyle="--", linewidth=1.5)
-                axs[0,1].text(val, cdf_y_pos, f"{label}: {val_str}", rotation=90, va='center', ha='left',
-                             fontsize=9, color=color, bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
-                # Descending CDF
+                axs[0,1].text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+                # Descending CDF — same style
                 axs[1,0].axvline(val, color=color, linestyle="--", linewidth=1.5)
-                axs[1,0].text(val, exc_y_pos, f"{label}: {val_str}", rotation=90, va='center', ha='left',
-                             fontsize=9, color=color, bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+                axs[1,0].text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
 
             plt.tight_layout()
             st.pyplot(fig)
