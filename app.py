@@ -11,12 +11,12 @@ st.set_page_config(page_title="OOIP Monte Carlo", layout="wide")
 st.title("OOIP Monte Carlo Estimator")
 
 # ------------------------------------------------------------------ #
-# 1. Upload & CORRECTED parsing for your EXACT layout
+# 1. Upload & CORRECTED parsing – 200 samples + metadata row
 # ------------------------------------------------------------------ #
 uploaded = st.file_uploader("Upload reference file (CSV or Excel)", type=["csv", "xlsx", "xls"])
 
 if uploaded:
-    # --- Read as strings to preserve scientific notation ---
+    # --- Read as strings ---
     if uploaded.name.endswith(".csv"):
         raw = pd.read_csv(uploaded, header=None, dtype=str, na_filter=False)
     else:
@@ -32,9 +32,8 @@ if uploaded:
         st.error("Could not find header row with 'Porosity'.")
         st.stop()
 
-    # --- Extract rows ---
     header = raw.iloc[header_row].astype(str).str.strip()
-    meta_row = raw.iloc[header_row + 1].astype(str).str.strip()  # Row with min/max labels
+    meta_row = raw.iloc[header_row + 1].astype(str).str.strip()  # min/max labels
     data_rows = raw.iloc[header_row + 2 :].reset_index(drop=True).astype(str).applymap(str.strip)
 
     # --- Map columns ---
@@ -62,32 +61,36 @@ if uploaded:
         st.error(f"Missing columns: {', '.join(missing)}")
         st.stop()
 
-    # --- Safe float conversion ---
+    # --- Safe float ---
     def safe_float(s):
         try:
             return float(str(s).replace(",", "").replace("\n","").replace("\r","").strip())
         except:
             return np.nan
 
-    # --- Extract samples from data_rows (skip metadata) ---
+    # --- Extract ALL 200 samples (data_rows has 200 rows) ---
     porosity = pd.to_numeric(data_rows.iloc[:, col_map["Porosity"]].apply(safe_float), errors='coerce').dropna().values
     ntg      = pd.to_numeric(data_rows.iloc[:, col_map["NetToGross"]].apply(safe_float), errors='coerce').dropna().values
 
-    # --- Extract Gross min/max from FIRST DATA ROW (Row 2 in original) ---
+    # --- Extract Gross min/max from FIRST DATA ROW ---
     first_data = data_rows.iloc[0]
     gross_min = safe_float(first_data.iloc[col_map["Gross_min"]])
     gross_max = safe_float(first_data.iloc[col_map["Gross_max"]])
 
-    # --- Extract Swi & Bo from METADATA ROW (Row 1) ---
+    # --- Extract Swi & Bo from METADATA ROW ---
     swi = safe_float(meta_row.iloc[col_map["Swi"]])
     bo  = safe_float(meta_row.iloc[col_map["Bo"]])
 
     if any(pd.isna(x) for x in [gross_min, gross_max, swi, bo]):
-        st.error("Failed to parse **Gross Volume**, **Swi**, or **Bo**. Check values in rows 2 and 3.")
+        st.error("Failed to parse **Gross Volume**, **Swi**, or **Bo**.")
         st.stop()
 
-    st.success("File parsed correctly!")
-    st.write(f"**Samples:** {len(porosity)} porosity, {len(ntg)} NTG")
+    # --- Confirm 200 samples ---
+    if len(porosity) != 200 or len(ntg) != 200:
+        st.warning(f"Expected 200 samples. Found: Porosity={len(porosity)}, NTG={len(ntg)}. Using available data.")
+    else:
+        st.success("File parsed perfectly — **200 samples detected**!")
+
     st.write(f"**Gross Vol:** {gross_min:,.2e} – {gross_max:,.2e} m³ | **Swi:** {swi:.3f} | **Bo:** {bo:.3f}")
 
     # ------------------------------------------------------------------ #
@@ -160,7 +163,7 @@ if uploaded:
             return rng.choice(samples, size=size, replace=True)
 
         phi = np.clip(draw(phi_dist, porosity, iterations), 0, 1)
-        ntg = np.clip(draw(ntg_dist, ntg, iterations), 0, 1)
+        ntg = np.clip(draw(ntg_dist, ntg,      iterations), 0, 1)
         gross = rng.uniform(gross_min, gross_max, iterations)
 
         net_vol = gross * ntg * phi
