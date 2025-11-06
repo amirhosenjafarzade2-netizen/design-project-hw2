@@ -103,14 +103,11 @@ if uploaded:
             return "Triangular", "Too few samples → using Triangular"
 
         tests = {}
-        # Normal
         _, p_norm = stats.shapiro(samples)
         tests["Normal"] = p_norm
-        # Uniform
         u = (samples - samples.min()) / (samples.max() - samples.min() + 1e-12)
         _, p_uni = stats.kstest(u, "uniform")
         tests["Uniform"] = p_uni
-        # Triangular
         try:
             c, loc, scale = stats.triang.fit(samples)
             _, p_tri = stats.kstest(samples, stats.triang.cdf, args=(c, loc, scale))
@@ -134,42 +131,42 @@ if uploaded:
         st.markdown(f"**Net-to-Gross (N/G):** `{ntg_dist}`  \n_{ntg_reason}_")
 
     # ------------------------------------------------------------------ #
-    # 3. User Controls
+    # 3. Volumetric Formula (UI Only)
+    # ------------------------------------------------------------------ #
+    st.markdown("---")
+    st.latex(r"\text{STOIIP} = \frac{\text{GRV} \times \text{N/G} \times \phi \times (1 - S_{wi})}{B_o}")
+
+    # ------------------------------------------------------------------ #
+    # 4. User Controls
     # ------------------------------------------------------------------ #
     st.markdown("---")
     st.subheader("Simulation Settings")
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        iterations = st.slider("Monte Carlo iterations", 1000, 100_000, 20000, 1000)
+        iterations = st.slider("Monte Carlo iterations", 10000, 100000, 20000, 1000)
     with col2:
         output_unit = st.radio("Output units", ["Stock Tank m³", "Barrels (STB)"], horizontal=True)
     with col3:
         plot_engine = st.radio("Plotting engine", ["Plotly (interactive)", "Matplotlib (static)"], horizontal=True)
 
-    # GRV settings
-    st.markdown("**Gross Rock Volume (GRV) Settings**")
-    col_g1, col_g2 = st.columns(2)
-    with col_g1:
-        grv_dist = st.selectbox("GRV Distribution", ["Uniform", "Triangular", "Normal", "PERT"])
-    with col_g2:
-        grv_perturb = st.slider("Perturb min/max GRV", 0, 20, 5, help="±% random variation in min/max")
+    # GRV distribution (no perturbation)
+    st.markdown("**Gross Rock Volume (GRV) Distribution**")
+    grv_dist = st.selectbox("Select GRV distribution", ["Uniform", "Triangular", "Normal"], index=0)
+
+    # Decimal places
+    decimals = st.slider("Decimal places on charts & results", 0, 6, 3)
 
     # ------------------------------------------------------------------ #
-    # 4. Run Simulation
+    # 5. Run Simulation
     # ------------------------------------------------------------------ #
     if st.button("Run Monte Carlo Simulation", type="primary", use_container_width=True):
         with st.spinner("Simulating..."):
             rng = np.random.default_rng()
 
-            # Perturb GRV bounds
-            if grv_perturb > 0:
-                factor = 1 + rng.normal(0, grv_perturb/100, size=iterations)
-                gmin = gross_min * np.clip(factor, 0.8, 1.2)
-                gmax = gross_max * np.clip(factor, 0.8, 1.2)
-            else:
-                gmin = np.full(iterations, gross_min)
-                gmax = np.full(iterations, gross_max)
+            # Fixed GRV bounds (no perturbation)
+            gmin = gross_min
+            gmax = gross_max
 
             # Draw ϕ and N/G
             def draw(dist, data, size):
@@ -192,11 +189,9 @@ if uploaded:
             elif grv_dist == "Triangular":
                 mode = (gmin + gmax) / 2
                 grv = rng.triangular(gmin, mode, gmax, iterations)
-            elif grv_dist == "PERT":
-                grv = stats.pert.rvs(4, (gmin + gmax)/2, gmax, gmin, size=iterations, random_state=rng)
             else:  # Normal
-                mean = (gmin + gmax)/2
-                std = (gmax - gmin)/6
+                mean = (gmin + gmax) / 2
+                std = (gmax - gmin) / 6
                 grv = np.clip(rng.normal(mean, std, iterations), gmin, gmax)
 
             # Volumetric
@@ -214,9 +209,8 @@ if uploaded:
         st.success("Simulation Complete!")
 
         # ----------------------------------------------------------------
-        # 5. Results
+        # 6. Results
         # ----------------------------------------------------------------
-        decimals = 3
         fmt = f"{{:.{decimals}e}}"
         col1, col2, col3 = st.columns(3)
         col1.metric("P10 (High)", f"{fmt.format(p10)} {unit}")
@@ -224,63 +218,63 @@ if uploaded:
         col3.metric("P90 (Low)", f"{fmt.format(p90)} {unit}")
 
         # ----------------------------------------------------------------
-        # 6. Plotting (User Choice)
+        # 7. Plotting (User Choice)
         # ----------------------------------------------------------------
         st.markdown("---")
-        st.subheader("Probability Distributions")
+        st.subheader("Descending Cumulative Distribution (Exceedance)")
 
         sorted_val = np.sort(stoiip)
-        cdf_y = np.linspace(0, 1, len(sorted_val))
+        exceedance = 1 - np.linspace(0, 1, len(sorted_val))
 
         if "Plotly" in plot_engine:
-            fig = make_subplots(rows=2, cols=2,
-                subplot_titles=("Histogram", "Ascending CDF", "Descending CDF", "Log Histogram"))
-            fig.add_trace(go.Histogram(x=stoiip, nbinsx=80), row=1, col=1)
-            fig.add_trace(go.Scatter(x=sorted_val, y=cdf_y, mode="lines", line=dict(color="blue")), row=1, col=2)
-            fig.add_trace(go.Scatter(x=sorted_val, y=1-cdf_y, mode="lines", line=dict(color="green")), row=2, col=1)
-            fig.add_trace(go.Histogram(x=stoiip, nbinsx=80), row=2, col=2)
-            fig.update_xaxes(type="log", row=2, col=2)
-            for val, label, colr in [(p90, "P90", "green"), (p50, "P50", "blue"), (p10, "P10", "red")]:
-                fig.add_vline(x=val, line=dict(dash="dash", color=colr), annotation_text=label, row=1, col=2)
-                fig.add_vline(x=val, line=dict(dash="dash", color=colr), annotation_text=label, row=2, col=1)
-            fig.update_layout(height=800, showlegend=False)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=sorted_val, y=exceedance, mode='lines', name='Exceedance',
+                                    line=dict(color='green', width=3)))
+            fig.add_trace(go.Scatter(x=[p10, p10], y=[0, 0.1], mode='lines', line=dict(dash='dash', color='red'),
+                                    name='P10'))
+            fig.add_trace(go.Scatter(x=[p50, p50], y=[0, 0.5], mode='lines', line=dict(dash='dash', color='blue'),
+                                    name='P50'))
+            fig.add_trace(go.Scatter(x=[p90, p90], y=[0, 0.9], mode='lines', line=dict(dash='dash', color='green'),
+                                    name='P90'))
+            fig.update_layout(
+                title="Descending CDF (Exceedance Probability)",
+                xaxis_title=f"STOIIP ({unit})",
+                yaxis_title="Probability of Exceedance",
+                xaxis=dict(tickformat=f".{decimals}e"),
+                height=600
+            )
             st.plotly_chart(fig, use_container_width=True)
 
-        else:  # Matplotlib (no seaborn)
-            plt.rcParams.update({"figure.figsize": (14, 10), "axes.grid": True, "grid.linestyle": "--"})
-            fig, axs = plt.subplots(2, 2)
-
-            axs[0,0].hist(stoiip, bins=80, color="#87CEEB", edgecolor="black")
-            axs[0,0].set_title("Histogram")
-            axs[0,1].plot(sorted_val, cdf_y, color="tab:blue", lw=2)
-            axs[0,1].set_title("Ascending CDF")
-            axs[1,0].plot(sorted_val, 1-cdf_y, color="tab:green", lw=2)
-            axs[1,0].set_title("Descending CDF")
-            axs[1,1].hist(stoiip, bins=80, color="#F08080", edgecolor="black", log=True)
-            axs[1,1].set_title("Log Histogram")
-
-            for val, label, colr in [(p90, "P90", "tab:green"), (p50, "P50", "tab:blue"), (p10, "P10", "tab:red")]:
-                axs[0,1].axvline(val, color=colr, linestyle="--", linewidth=1.5)
-                axs[1,0].axvline(val, color=colr, linestyle="--", linewidth=1.5)
-
-            plt.tight_layout()
-            st.pyplot(fig)
+        else:  # Matplotlib
+            plt.figure(figsize=(10, 6))
+            plt.plot(sorted_val, exceedance, color='green', linewidth=3, label='Exceedance')
+            plt.axvline(p10, color='red', linestyle='--', label=f'P10: {fmt.format(p10)}')
+            plt.axvline(p50, color='blue', linestyle='--', label=f'P50: {fmt.format(p50)}')
+            plt.axvline(p90, color='green', linestyle='--', label=f'P90: {fmt.format(p90)}')
+            plt.xlabel(f"STOIIP ({unit})")
+            plt.ylabel("Probability of Exceedance")
+            plt.title("Descending Cumulative Distribution")
+            plt.legend()
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.gca().ticklabel_format(axis='x', style='sci', scilimits=(0,0))
+            st.pyplot(plt)
 
         # ----------------------------------------------------------------
-        # 7. Download
+        # 8. Download
         # ----------------------------------------------------------------
         results_df = pd.DataFrame({
-            f"STOIIP ({unit})": np.round(stoiip, 3),
+            f"STOIIP ({unit})": np.round(stoiip, decimals),
             "Porosity": np.round(phi, 4),
             "N/G": np.round(ntg, 4),
             "GRV (m³)": grv.astype(int)
         })
         st.download_button("Download Results CSV", results_df.to_csv(index=False), "monte_carlo_results.csv")
         st.download_button("Download Summary", f"""
-P10: {fmt.format(p10)} {unit}
-P50: {fmt.format(p50)} {unit}
-P90: {fmt.format(p90)} {unit}
+P10 (High): {fmt.format(p10)} {unit}
+P50 (Median): {fmt.format(p50)} {unit}
+P90 (Low): {fmt.format(p90)} {unit}
 ϕ ~ {phi_dist} | N/G ~ {ntg_dist} | GRV ~ {grv_dist}
+Iterations: {iterations:,}
 """, "summary.txt")
 
 else:
