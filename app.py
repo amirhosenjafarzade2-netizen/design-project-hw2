@@ -99,7 +99,7 @@ if uploaded:
     st.markdown("---")
     st.subheader("Detected Input Distributions")
 
-    def detect_distribution samples, name):
+    def detect_distribution(samples, name):
         if len(samples) < 15:
             return "Triangular", "Too few samples → using Triangular"
         
@@ -217,7 +217,8 @@ if uploaded:
         # ----------------------------------------------------------------
         # 5. Results
         # ----------------------------------------------------------------
-        fmt = f"{{:.{st.session_state.get('decimals', 3)}e}}"
+        decimals = 3
+        fmt = f"{{:.{decimals}e}}"
         col1, col2, col3 = st.columns(3)
         col1.metric("P10 (High)", f"{fmt.format(p10)} {unit}")
         col2.metric("P50 (Median)", f"{fmt.format(p50)} {unit}")
