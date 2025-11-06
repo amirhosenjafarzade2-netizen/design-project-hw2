@@ -11,74 +11,87 @@ st.set_page_config(page_title="OOIP Monte Carlo", layout="wide")
 st.title("OOIP Monte Carlo Estimator")
 
 # ------------------------------------------------------------------ #
-# 1. Upload & robust parsing
+# 1. Upload & robust parsing (FIXED for scientific notation)
 # ------------------------------------------------------------------ #
 uploaded = st.file_uploader("Upload reference file (CSV or Excel)", type=["csv", "xlsx", "xls"])
 
 if uploaded:
+    # --- Read ENTIRE file as strings to preserve "6.99E+08" ---
     if uploaded.name.endswith(".csv"):
-        raw = pd.read_csv(uploaded, header=None)
+        raw = pd.read_csv(uploaded, header=None, dtype=str, na_filter=False)
     else:
-        raw = pd.read_excel(uploaded, header=None)
+        raw = pd.read_excel(uploaded, header=None, dtype=str, na_filter=False)
 
+    # --- Find header row (contains "Porosity") ---
     header_row = None
-    for i, row in raw.iterrows():
-        if "Porosity" in str(row.values):
+    for i in range(len(raw)):
+        row_values = raw.iloc[i].astype(str).str.lower()
+        if row_values.str.contains("porosity").any():
             header_row = i
             break
     if header_row is None:
-        st.error("Could not find a row containing the word **Porosity**.")
+        st.error("Could not find a row containing **Porosity**.")
         st.stop()
 
-    header = raw.iloc[header_row]
-    data   = raw.iloc[header_row+1:].reset_index(drop=True)
+    header = raw.iloc[header_row].astype(str)
+    data   = raw.iloc[header_row+1:].reset_index(drop=True).astype(str)
 
+    # --- Map columns by keyword (case-insensitive, flexible) ---
     col_map = {}
-    for idx, name in enumerate(header):
-        name_str = str(name).strip().lower()
-        if "porosity" in name_str:
+    header_lower = header.str.lower().str.strip()
+
+    for idx, name in enumerate(header_lower):
+        if "porosity" in name:
             col_map["Porosity"] = idx
-        elif "permeability" in name_str:
+        elif "permeability" in name:
             col_map["Permeability_md"] = idx
-        elif "net" in name_str and "gross" in name_str:
+        elif "net" in name and "gross" in name:
             col_map["NetToGross"] = idx
-        elif "gross volume" in name_str:
+        elif "gross volume" in name or "gross vol" in name:
             col_map["Gross_min"] = idx
-            col_map["Gross_max"] = idx + 1
-        elif "swi" in name_str:
+            col_map["Gross_max"] = idx + 1  # assume min/max side-by-side
+        elif "swi" in name:
             col_map["Swi"] = idx
-        elif "formation" in name_str or "bo" in name_str:
+        elif "formation" in name or "bo" in name:
             col_map["Bo"] = idx
 
-    missing = [k for k in ["Porosity","Permeability_md","NetToGross",
-                           "Gross_min","Gross_max","Swi","Bo"] if k not in col_map]
+    required = ["Porosity", "Permeability_md", "NetToGross", "Gross_min", "Gross_max", "Swi", "Bo"]
+    missing = [k for k in required if k not in col_map]
     if missing:
         st.error(f"Missing columns: {', '.join(missing)}")
         st.stop()
 
-    porosity = pd.to_numeric(data.iloc[:, col_map["Porosity"]], errors="coerce").dropna().values
-    perm     = pd.to_numeric(data.iloc[:, col_map["Permeability_md"]], errors="coerce").dropna().values
-    ntg      = pd.to_numeric(data.iloc[:, col_map["NetToGross"]], errors="coerce").dropna().values
+    # --- Extract samples (rows 1+ after header) ---
+    def to_float(series):
+        return pd.to_numeric(series.str.replace(',', ''), errors='coerce')
 
-    gross_min = pd.to_numeric(data.iloc[0, col_map["Gross_min"]], errors="coerce")
-    gross_max = pd.to_numeric(data.iloc[0, col_map["Gross_max"]], errors="coerce")
-    swi       = pd.to_numeric(data.iloc[0, col_map["Swi"]], errors="coerce")
-    bo        = pd.to_numeric(data.iloc[0, col_map["Bo"]], errors="coerce")
+    porosity = to_float(data.iloc[:, col_map["Porosity"]]).dropna().values
+    perm     = to_float(data.iloc[:, col_map["Permeability_md"]]).dropna().values
+    ntg      = to_float(data.iloc[:, col_map["NetToGross"]]).dropna().values
 
-    if any(v is None for v in [gross_min, gross_max, swi, bo]):
-        st.error("Could not parse Gross Volume, Swi or Bo from the first data row.")
+    # --- Extract min/max, Swi, Bo from FIRST data row ---
+    first_row = data.iloc[0]
+
+    gross_min = pd.to_numeric(str(first_row.iloc[col_map["Gross_min"]]).replace(',', ''), errors='coerce')
+    gross_max = pd.to_numeric(str(first_row.iloc[col_map["Gross_max"]]).replace(',', ''), errors='coerce')
+    swi       = pd.to_numeric(str(first_row.iloc[col_map["Swi"]]).replace(',', ''), errors='coerce')
+    bo        = pd.to_numeric(str(first_row.iloc[col_map["Bo"]]).replace(',', ''), errors='coerce')
+
+    if any(pd.isna(x) for x in [gross_min, gross_max, swi, bo]):
+        st.error("Failed to parse **Gross Volume**, **Swi**, or **Bo** from first data row. Check scientific notation and commas.")
         st.stop()
 
     st.success("File parsed successfully!")
     st.write(f"**Samples:** {len(porosity)} porosity, {len(ntg)} NTG")
-    st.write(f"**Gross Vol:** {gross_min:.2e} – {gross_max:.2e} m³ | **Swi:** {swi:.3f} | **Bo:** {bo:.3f}")
+    st.write(f"**Gross Vol:** {gross_min:,.2e} – {gross_max:,.2e} m³ | **Swi:** {swi:.3f} | **Bo:** {bo:.3f}")
 
     # ------------------------------------------------------------------ #
     # 2. Distribution detection
     # ------------------------------------------------------------------ #
     def best_distribution(samples, name):
         if len(samples) < 20:
-            return "bootstrap", None
+            st.write(f"**{name}:** too few samples → using **bootstrap**")
+            return "bootstrap"
 
         tests = {}
         _, p = stats.shapiro(samples)
@@ -102,10 +115,10 @@ if uploaded:
 
         best = max(tests, key=tests.get)
         st.write(f"**{name}:** best fit → **{best}** (p={tests[best]:.3f})")
-        return best, tests[best]
+        return best
 
-    phi_dist, _ = best_distribution(porosity, "Porosity")
-    ntg_dist, _ = best_distribution(ntg,      "NetToGross")
+    phi_dist = best_distribution(porosity, "Porosity")
+    ntg_dist = best_distribution(ntg,      "NetToGross")
 
     # ------------------------------------------------------------------ #
     # 3. UI Controls
@@ -169,25 +182,23 @@ if uploaded:
         col2.metric("P50 (Median)", fmt.format(p50))
         col3.metric("Std Dev", fmt.format(ooip.std()))
 
-        st.markdown(f"**P10 / P50 / P90** (rounded to {decimals} decimals)")
+        st.markdown(f"**P10 / P50 / P90** (rounded to {decimals} decimal(s))")
         st.write(f"**P10 (high):** {fmt.format(p10)} | **P50:** {fmt.format(p50)} | **P90 (low):** {fmt.format(p90)}")
 
         # ----------------------------------------------------------------
-        # 7. Plots with clean formatting
+        # 7. Plots
         # ----------------------------------------------------------------
         fig = make_subplots(
             rows=2, cols=2,
-            subplot_titles=("Histogram", "Ascending CDF", "Descending CDF", "Histogram (log scale)"),
+            subplot_titles=("Histogram", "Ascending CDF", "Descending CDF", "Histogram (log)"),
             specs=[[{"type":"histogram"},{"type":"xy"}],
                    [{"type":"xy"},      {"type":"histogram"}]]
         )
 
-        # Histogram
         fig.add_trace(go.Histogram(x=ooip, nbinsx=60, name="OOIP",
                                  hovertemplate=f"OOIP: %{{x:{fmt}}} <br>Count: %{{y}}<extra></extra>"),
                       row=1, col=1)
 
-        # CDFs
         sorted_o = np.sort(ooip)
         prob = np.linspace(0, 1, len(sorted_o))
 
@@ -203,7 +214,6 @@ if uploaded:
                                  hovertemplate=f"OOIP: %{{x:{fmt}}} <br>Count: %{{y}}<extra></extra>"),
                       row=2, col=2)
 
-        # P10/P50/P90 lines
         if show_p:
             for val, label, color in [(p90, "P90 (low)", "green"),
                                       (p50, "P50", "blue"),
@@ -223,7 +233,7 @@ if uploaded:
         st.plotly_chart(fig, use_container_width=True)
 
         # ----------------------------------------------------------------
-        # 8. Download (rounded)
+        # 8. Download
         # ----------------------------------------------------------------
         ooip_rounded = np.round(ooip, decimals)
         csv = pd.DataFrame({"OOIP": ooip_rounded}).to_csv(index=False)
