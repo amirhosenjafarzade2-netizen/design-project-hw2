@@ -5,9 +5,11 @@ import numpy as np
 from scipy import stats
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 st.set_page_config(page_title="OOIP/STOIIP Monte Carlo", layout="wide")
-st.title("🛢️ OOIP/STOIIP Monte Carlo Estimator")
+st.title("OOIP/STOIIP Monte Carlo Estimator")
 st.markdown("**Volumetric Hydrocarbon-in-Place Estimation Under Uncertainty**")
 
 # ------------------------------------------------------------------ #
@@ -16,13 +18,11 @@ st.markdown("**Volumetric Hydrocarbon-in-Place Estimation Under Uncertainty**")
 uploaded = st.file_uploader("Upload reservoir data file (CSV or Excel)", type=["csv", "xlsx", "xls"])
 
 if uploaded:
-    # --- Read as strings ---
     if uploaded.name.endswith(".csv"):
         raw = pd.read_csv(uploaded, header=None, dtype=str, na_filter=False)
     else:
         raw = pd.read_excel(uploaded, header=None, dtype=str, na_filter=False)
 
-    # --- Find header row ---
     header_row = None
     for i in range(len(raw)):
         if "porosity" in raw.iloc[i].astype(str).str.lower().values:
@@ -36,7 +36,6 @@ if uploaded:
     meta_row = raw.iloc[header_row + 1].astype(str).str.strip()
     data_rows = raw.iloc[header_row + 2:].reset_index(drop=True).astype(str).applymap(str.strip)
 
-    # --- Map columns ---
     col_map = {}
     header_low = header.str.lower()
     for idx, name in enumerate(header_low):
@@ -60,306 +59,226 @@ if uploaded:
         st.error(f"Missing required columns: {', '.join(missing)}")
         st.stop()
 
-    # --- Safe float conversion ---
     def safe_float(s):
         try:
             return float(str(s).replace(",", "").replace("\n", "").replace("\r", "").strip())
         except:
             return np.nan
 
-    # --- Extract samples ---
     porosity = pd.to_numeric(data_rows.iloc[:, col_map["Porosity"]].apply(safe_float), errors='coerce').dropna().values
     ntg = pd.to_numeric(data_rows.iloc[:, col_map["NetToGross"]].apply(safe_float), errors='coerce').dropna().values
-
-    # --- Extract parameters ---
-    first_data = data_rows.iloc[0]
-    gross_min = safe_float(first_data.iloc[col_map["Gross_min"]])
-    gross_max = safe_float(first_data.iloc[col_map["Gross_max"]])
+    gross_min = safe_float(data_rows.iloc[0, col_map["Gross_min"]])
+    gross_max = safe_float(data_rows.iloc[0, col_map["Gross_max"]])
     swi = safe_float(meta_row.iloc[col_map["Swi"]])
     bo = safe_float(meta_row.iloc[col_map["Bo"]])
 
     if any(pd.isna(x) for x in [gross_min, gross_max, swi, bo]):
-        st.error("Failed to parse **Gross Volume**, **Swi**, or **Bo**. Please check file format.")
+        st.error("Failed to parse **Gross Volume**, **Swi**, or **Bo**.")
         st.stop()
 
-    # Validate data
     if len(porosity) < 10 or len(ntg) < 10:
-        st.error(f"Insufficient samples: Porosity={len(porosity)}, NTG={len(ntg)}. Need at least 10 samples each.")
+        st.error(f"Need ≥10 samples. Got: Porosity={len(porosity)}, N/G={len(ntg)}")
         st.stop()
 
-    # Clip values to valid ranges
     porosity = np.clip(porosity, 0, 1)
     ntg = np.clip(ntg, 0, 1)
 
-    # Display parsed data
-    st.success(f"✅ File parsed successfully — **{len(porosity)} samples** detected!")
-   
+    st.success(f"File parsed — {len(porosity)} valid samples")
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Porosity samples", len(porosity))
-        st.write(f"Range: {porosity.min():.3f} - {porosity.max():.3f}")
+        st.metric("Porosity", f"{porosity.mean():.3f} ± {porosity.std():.3f}")
     with col2:
-        st.metric("N/G samples", len(ntg))
-        st.write(f"Range: {ntg.min():.3f} - {ntg.max():.3f}")
+        st.metric("N/G", f"{ntg.mean():.3f} ± {ntg.std():.3f}")
     with col3:
-        st.metric("Gross Volume (m³)", f"{gross_min:.2e} - {gross_max:.2e}")
+        st.metric("GRV (m³)", f"{gross_min:.2e} – {gross_max:.2e}")
         st.write(f"Swi: {swi:.3f} | Bo: {bo:.3f}")
 
     # ------------------------------------------------------------------ #
-    # 2. Distribution detection (for suggestion only)
+    # 2. Auto-detect distributions for Porosity & N/G
     # ------------------------------------------------------------------ #
     st.markdown("---")
-    st.subheader("📊 Suggested Distributions (based on data fit)")
+    st.subheader("Detected Input Distributions")
 
-    def best_distribution(samples, name):
-        if len(samples) < 20:
-            return "Triangular", {"reason": "Too few samples"}
+    def detect_distribution samples, name):
+        if len(samples) < 15:
+            return "Triangular", "Too few samples → using Triangular"
+        
         tests = {}
-        # Shapiro-Wilk for normality
-        try:
-            _, p = stats.shapiro(samples)
-            tests["Normal"] = p
-        except:
-            pass
-        # KS for uniform
-        try:
-            u = (samples - samples.min()) / (samples.max() - samples.min() + 1e-12)
-            _, p = stats.kstest(u, "uniform")
-            tests["Uniform"] = p
-        except:
-            pass
+        # Normal
+        _, p_norm = stats.shapiro(samples)
+        tests["Normal"] = p_norm
+        # Uniform
+        u = (samples - samples.min()) / (samples.max() - samples.min() + 1e-12)
+        _, p_uni = stats.kstest(u, "uniform")
+        tests["Uniform"] = p_uni
         # Triangular
         try:
-            a, b = samples.min(), samples.max()
-            c_loc = mode_est = stats.mode(samples, keepdims=False)[0] or np.median(samples)
-            c = (c_loc - a) / (b - a + 1e-12)
-            _, p = stats.kstest(samples, stats.triang.cdf, args=(c, a, b-a))
-            tests["Triangular"] = p
+            c, loc, scale = stats.triang.fit(samples)
+            _, p_tri = stats.kstest(samples, stats.triang.cdf, args=(c, loc, scale))
+            tests["Triangular"] = p_tri
         except:
-            pass
-        if not tests:
-            return "Triangular", {"reason": "Fallback"}
-        best = max(tests, key=tests.get)
-        return best, tests
+            tests["Triangular"] = 0
 
-    phi_suggested, phi_info = best_distribution(porosity, "Porosity")
-    ntg_suggested, ntg_info = best_distribution(ntg, "NetToGross")
+        best = max(tests, key=tests.get)
+        reason = f"Best p-value: {tests[best]:.4f}"
+        if best == "Triangular" and tests[best] < 0.05:
+            reason += " (fallback)"
+        return best, reason
+
+    phi_dist, phi_reason = detect_distribution(porosity, "Porosity")
+    ntg_dist, ntg_reason = detect_distribution(ntg, "NetToGross")
 
     col1, col2 = st.columns(2)
     with col1:
-        st.write("**Porosity (ϕ):**")
-        st.write(f"Suggested: **{phi_suggested}**")
+        st.markdown(f"**Porosity (ϕ):** `{phi_dist}`  \n_{phi_reason}_")
     with col2:
-        st.write("**Net-to-Gross (N/G):**")
-        st.write(f"Suggested: **{ntg_suggested}**")
+        st.markdown(f"**Net-to-Gross (N/G):** `{ntg_dist}`  \n_{ntg_reason}_")
 
     # ------------------------------------------------------------------ #
-    # 3. User Controls - Distribution selection
+    # 3. User Controls
     # ------------------------------------------------------------------ #
     st.markdown("---")
-    st.subheader("⚙️ Parameter Distributions")
-
-    dist_options = ["Uniform", "Triangular", "Normal", "Bootstrap (empirical)"]
+    st.subheader("Simulation Settings")
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        phi_dist = st.selectbox("Porosity Distribution", dist_options, index=dist_options.index(phi_suggested) if phi_suggested in dist_options else 0)
+        iterations = st.slider("Monte Carlo iterations", 1000, 100_000, 20000, 1000)
     with col2:
-        ntg_dist = st.selectbox("N/G Distribution", dist_options, index=dist_options.index(ntg_suggested) if ntg_suggested in dist_options else 0)
+        output_unit = st.radio("Output units", ["Stock Tank m³", "Barrels (STB)"], horizontal=True)
     with col3:
-        grv_dist = st.selectbox("GRV Distribution", ["Uniform", "Triangular", "Normal", "Pert (3-point)"], index=0)
+        plot_engine = st.radio("Plotting engine", ["Plotly (interactive)", "Matplotlib (static)"], horizontal=True)
 
-    # GRV extra params
-    st.markdown("**GRV Advanced Settings**")
+    # GRV settings
+    st.markdown("**Gross Rock Volume (GRV) Settings**")
     col_g1, col_g2 = st.columns(2)
     with col_g1:
-        grv_most_likely = st.number_input("Most likely GRV (mode)", value=(gross_min + gross_max)/2, format="%.2e")
+        grv_dist = st.selectbox("GRV Distribution", ["Uniform", "Triangular", "Normal", "PERT"])
     with col_g2:
-        grv_random_points = st.slider("Number of random points for min/max perturbation", 3, 50, 10,
-                                      help="Generates random min/max around original values for realism")
+        grv_perturb = st.slider("Perturb min/max GRV", 0, 20, 5, help="±% random variation in min/max")
 
     # ------------------------------------------------------------------ #
-    # 4. Simulation Settings
+    # 4. Run Simulation
     # ------------------------------------------------------------------ #
-    st.markdown("---")
-    st.subheader("🚀 Simulation Settings")
-    col1, col2, col3 = st.columns(3)
-   
-    with col1:
-        use_slider = st.radio("Iteration input method:", ["Slider", "Direct Input"], horizontal=True)
-        if use_slider == "Slider":
-            iterations = st.slider("Monte Carlo iterations", 1000, 100_000, 20000, 1000)
-        else:
-            iterations = st.number_input("Monte Carlo iterations", min_value=1000, max_value=500_000, value=20000, step=5000)
-   
-    with col2:
-        output_unit = st.radio("Output units:", ["Stock Tank m³", "Barrels (STB)"], horizontal=True)
-        decimals = st.slider("Decimal places", 0, 6, 3)
-   
-    with col3:
-        show_markers = st.checkbox("Mark P10/P50/P90 on plots", True)
-
-    st.info("💡 Different distributions for ϕ and N/G are **perfectly fine and recommended** when data suggests it!")
-
-    # ------------------------------------------------------------------ #
-    # 5. Run simulation
-    # ------------------------------------------------------------------ #
-    if st.button("🚀 Run Monte Carlo Simulation", type="primary", use_container_width=True):
-        with st.spinner("Running Monte Carlo simulation..."):
-            prog = st.progress(0)
+    if st.button("Run Monte Carlo Simulation", type="primary", use_container_width=True):
+        with st.spinner("Simulating..."):
             rng = np.random.default_rng()
 
-            # Perturb GRV min/max
-            prog.progress(10)
-            perturb = rng.normal(1.0, 0.05, size=(iterations, grv_random_points))  # 5% std
-            factors_min = perturb.min(axis=1)
-            factors_max = perturb.max(axis=1)
-            grv_min_rand = gross_min * factors_min
-            grv_max_rand = gross_max * factors_max
-            grv_min_rand = np.clip(grv_min_rand, gross_min*0.8, gross_min*1.2)
-            grv_max_rand = np.clip(grv_max_rand, gross_max*0.8, gross_max*1.2)
+            # Perturb GRV bounds
+            if grv_perturb > 0:
+                factor = 1 + rng.normal(0, grv_perturb/100, size=iterations)
+                gmin = gross_min * np.clip(factor, 0.8, 1.2)
+                gmax = gross_max * np.clip(factor, 0.8, 1.2)
+            else:
+                gmin = np.full(iterations, gross_min)
+                gmax = np.full(iterations, gross_max)
 
-            def draw(dist, samples, size):
-                if dist == "Bootstrap (empirical)":
-                    return rng.choice(samples, size=size, replace=True)
+            # Draw ϕ and N/G
+            def draw(dist, data, size):
                 if dist == "Normal":
-                    mu, sigma = stats.norm.fit(samples)
+                    mu, sigma = stats.norm.fit(data)
                     return rng.normal(mu, sigma, size)
                 if dist == "Uniform":
-                    return rng.uniform(samples.min(), samples.max(), size)
+                    return rng.uniform(data.min(), data.max(), size)
                 if dist == "Triangular":
-                    c, loc, scale = stats.triang.fit(samples)
+                    c, loc, scale = stats.triang.fit(data)
                     return stats.triang.rvs(c, loc, scale, size=size, random_state=rng)
-                return rng.choice(samples, size=size, replace=True)
+                return rng.choice(data, size=size, replace=True)
 
-            prog.progress(30)
             phi = np.clip(draw(phi_dist, porosity, iterations), 0.001, 0.99)
             ntg = np.clip(draw(ntg_dist, ntg, iterations), 0.001, 1.0)
 
-            prog.progress(50)
+            # GRV
             if grv_dist == "Uniform":
-                grv = rng.uniform(grv_min_rand, grv_max_rand, iterations)
-            elif grv_dist == "Pert (3-point)":
-                grv = stats.pert.rvs(4, grv_most_likely, grv_max_rand, grv_min_rand, size=iterations, random_state=rng)
+                grv = rng.uniform(gmin, gmax, iterations)
             elif grv_dist == "Triangular":
-                grv = rng.triangular(grv_min_rand, grv_most_likely, grv_max_rand, iterations)
+                mode = (gmin + gmax) / 2
+                grv = rng.triangular(gmin, mode, gmax, iterations)
+            elif grv_dist == "PERT":
+                grv = stats.pert.rvs(4, (gmin + gmax)/2, gmax, gmin, size=iterations, random_state=rng)
             else:  # Normal
-                mean = (grv_min_rand + grv_max_rand) / 2
-                std = (grv_max_rand - grv_min_rand) / 6
-                grv = np.clip(rng.normal(mean, std, iterations), grv_min_rand, grv_max_rand)
+                mean = (gmin + gmax)/2
+                std = (gmax - gmin)/6
+                grv = np.clip(rng.normal(mean, std, iterations), gmin, gmax)
 
-            prog.progress(70)
-            net_rock_volume = grv * ntg
-            hc_pore_volume = net_rock_volume * phi * (1 - swi)
-            stoiip_m3 = hc_pore_volume / bo
+            # Volumetric
+            net_vol = grv * ntg
+            hc_vol = net_vol * phi * (1 - swi)
+            stoiip_m3 = hc_vol / bo
+            stoiip = stoiip_m3 * (6.289811 if output_unit.startswith("Barrels") else 1)
+            unit = "STB" if "Barrels" in output_unit else "m³"
 
-            if output_unit == "Barrels (STB)":
-                stoiip = stoiip_m3 * 6.289811  # more precise
-                unit_label = "STB"
-            else:
-                stoiip = stoiip_m3
-                unit_label = "m³"
+            # Percentiles
+            p90 = np.percentile(stoiip, 10)
+            p50 = np.percentile(stoiip, 50)
+            p10 = np.percentile(stoiip, 90)
 
-            prog.progress(100)
-
-        st.success("✅ Simulation complete!")
+        st.success("Simulation Complete!")
 
         # ----------------------------------------------------------------
-        # 6. Percentiles (corrected order)
+        # 5. Results
         # ----------------------------------------------------------------
-        p90 = np.percentile(stoiip, 10)   # Low case (90% exceed)
-        p50 = np.percentile(stoiip, 50)   # Median
-        p10 = np.percentile(stoiip, 90)   # High case (10% exceed)
-
-        fmt = f"{{:.{decimals}e}}"
+        fmt = f"{{:.{st.session_state.get('decimals', 3)}e}}"
+        col1, col2, col3 = st.columns(3)
+        col1.metric("P10 (High)", f"{fmt.format(p10)} {unit}")
+        col2.metric("P50 (Median)", f"{fmt.format(p50)} {unit}")
+        col3.metric("P90 (Low)", f"{fmt.format(p90)} {unit}")
 
         # ----------------------------------------------------------------
-        # 7. Results
+        # 6. Plotting (User Choice)
         # ----------------------------------------------------------------
         st.markdown("---")
-        st.subheader("📈 Results")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Mean STOIIP", f"{fmt.format(stoiip.mean())} {unit_label}")
-        col2.metric("P50 (Median)", f"{fmt.format(p50)} {unit_label}")
-        col3.metric("Std Dev", f"{fmt.format(stoiip.std())} {unit_label}")
-        col4.metric("CoV", f"{stoiip.std()/stoiip.mean():.2%}")
+        st.subheader("Probability Distributions")
 
-        st.markdown("### 🎯 Proven Reserves (PRMS Style)")
-        pcol1, pcol2, pcol3 = st.columns(3)
-        pcol1.metric("P10 (High Estimate)", f"{fmt.format(p10)} {unit_label}",
-                     help="10% probability this value will be exceeded")
-        pcol2.metric("P50 (Best Estimate)", f"{fmt.format(p50)} {unit_label}")
-        pcol3.metric("P90 (Low Estimate)", f"{fmt.format(p90)} {unit_label}",
-                     help="90% probability this value will be exceeded")
+        sorted_val = np.sort(stoiip)
+        cdf_y = np.linspace(0, 1, len(sorted_val))
 
-        # ----------------------------------------------------------------
-        # 8. Plots (FIXED descending CDF)
-        # ----------------------------------------------------------------
-        st.markdown("---")
-        st.subheader("📊 Probability Distributions")
-        fig = make_subplots(
-            rows=2, cols=2,
-            subplot_titles=(
-                f"Histogram of STOIIP ({unit_label})",
-                "Ascending CDF",
-                "Descending CDF (Exceedance Probability)",
-                "Histogram (Log Scale)"
-            ),
-            specs=[[{"type": "histogram"}, {"type": "xy"}],
-                   [{"type": "xy"}, {"type": "histogram"}]]
-        )
+        if "Plotly" in plot_engine:
+            fig = make_subplots(rows=2, cols=2,
+                subplot_titles=("Histogram", "Ascending CDF", "Descending CDF", "Log Histogram"))
+            fig.add_trace(go.Histogram(x=stoiip, nbinsx=80), row=1, col=1)
+            fig.add_trace(go.Scatter(x=sorted_val, y=cdf_y, mode="lines", line=dict(color="blue")), row=1, col=2)
+            fig.add_trace(go.Scatter(x=sorted_val, y=1-cdf_y, mode="lines", line=dict(color="green")), row=2, col=1)
+            fig.add_trace(go.Histogram(x=stoiip, nbinsx=80), row=2, col=2)
+            fig.update_xaxes(type="log", row=2, col=2)
+            for val, label, colr in [(p90, "P90", "green"), (p50, "P50", "blue"), (p10, "P10", "red")]:
+                fig.add_vline(x=val, line=dict(dash="dash", color=colr), annotation_text=label, row=1, col=2)
+                fig.add_vline(x=val, line=dict(dash="dash", color=colr), annotation_text=label, row=2, col=1)
+            fig.update_layout(height=800, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
 
-        # Histogram
-        fig.add_trace(go.Histogram(x=stoiip, nbinsx=100, name="STOIIP", marker_color='skyblue'), row=1, col=1)
-
-        # Ascending CDF
-        sorted_stoiip = np.sort(stoiip)
-        prob = np.linspace(0, 1, len(sorted_stoiip))
-        fig.add_trace(go.Scatter(x=sorted_stoiip, y=prob, mode="lines", name="CDF", line=dict(color='blue', width=3)), row=1, col=2)
-
-        # Descending CDF - FIXED
-        fig.add_trace(go.Scatter(x=sorted_stoiip, y=1 - prob, mode="lines", name="Exceedance", line=dict(color='green', width=3)), row=2, col=1)
-
-        # Log histogram
-        fig.add_trace(go.Histogram(x=stoiip, nbinsx=100, name="Log", marker_color='lightcoral'), row=2, col=2)
-
-        if show_markers:
-            for val, label, color in [(p90, "P90 (Low)", "green"), (p50, "P50", "blue"), (p10, "P10 (High)", "red")]:
-                fig.add_vline(x=val, line=dict(dash="dash", color=color, width=2),
-                              annotation_text=f"{label}: {fmt.format(val)}", row=1, col=2)
-                fig.add_vline(x=val, line=dict(dash="dash", color=color, width=2),
-                              annotation_text=f"{label}: {fmt.format(val)}", row=2, col=1)
-
-        fig.update_layout(height=1000, showlegend=False, hovermode="closest")
-        fig.update_xaxes(title_text=f"STOIIP ({unit_label})", tickformat=f".{decimals}e")
-        fig.update_yaxes(title_text="Frequency", row=1, col=1)
-        fig.update_yaxes(title_text="Cumulative Probability", row=1, col=2)
-        fig.update_yaxes(title_text="Exceedance Probability", row=2, col=1)
-        fig.update_xaxes(type="log", row=2, col=2)
-
-        st.plotly_chart(fig, use_container_width=True)
+        else:  # Matplotlib
+            sns.set_style("whitegrid")
+            fig, axs = plt.subplots(2, 2, figsize=(14, 10))
+            axs[0,0].hist(stoiip, bins=80, color='skyblue', edgecolor='black')
+            axs[0,0].set_title("Histogram")
+            axs[0,1].plot(sorted_val, cdf_y, color='blue', lw=2)
+            axs[0,1].set_title("Ascending CDF")
+            axs[1,0].plot(sorted_val, 1-cdf_y, color='green', lw=2)
+            axs[1,0].set_title("Descending CDF")
+            axs[1,1].hist(stoiip, bins=80, color='lightcoral', edgecolor='black', log=True)
+            axs[1,1].set_title("Log Histogram")
+            for val, label, colr in [(p90, "P90", "green"), (p50, "P50", "blue"), (p10, "P10", "red")]:
+                axs[0,1].axvline(val, color=colr, linestyle="--", label=label)
+                axs[1,0].axvline(val, color=colr, linestyle="--")
+            plt.tight_layout()
+            st.pyplot(fig)
 
         # ----------------------------------------------------------------
-        # 9. Summary & Download
+        # 7. Download
         # ----------------------------------------------------------------
-        st.markdown("---")
-        st.download_button("📥 Download Full Results CSV", 
-                           data=pd.DataFrame({f'STOIIP ({unit_label})': np.round(stoiip, decimals),
-                                              'Porosity': np.round(phi, 4),
-                                              'N/G': np.round(ntg, 4),
-                                              'GRV (m³)': np.round(grv, 0)}).to_csv(index=False),
-                           file_name=f"OOIP_results_{iterations}.csv")
-
-        st.download_button("📄 Download Summary Report",
-                           data=f"""OOIP Monte Carlo Report - Reservoir 3
-Iterations: {iterations:,}
-P10 (High): {fmt.format(p10)} {unit_label}
-P50 (Median): {fmt.format(p50)} {unit_label}
-P90 (Low): {fmt.format(p90)} {unit_label}
-Porosity Dist: {phi_dist} | N/G Dist: {ntg_dist} | GRV Dist: {grv_dist}
-""",
-                           file_name="OOIP_summary.txt")
+        results_df = pd.DataFrame({
+            f"STOIIP ({unit})": np.round(stoiip, 3),
+            "Porosity": np.round(phi, 4),
+            "N/G": np.round(ntg, 4),
+            "GRV (m³)": grv.astype(int)
+        })
+        st.download_button("Download Results CSV", results_df.to_csv(index=False), "monte_carlo_results.csv")
+        st.download_button("Download Summary", f"""
+P10: {fmt.format(p10)} {unit}
+P50: {fmt.format(p50)} {unit}
+P90: {fmt.format(p90)} {unit}
+ϕ ~ {phi_dist} | N/G ~ {ntg_dist} | GRV ~ {grv_dist}
+""", "summary.txt")
 
 else:
-    st.info("👆 Upload your Reservoir CSV/Excel file to start!")
-    st.markdown("**Expected format:** Porosity, NetToGross, Gross Volume min/max, Swi, Bo")
+    st.info("Upload your reservoir CSV/Excel file to begin.")
