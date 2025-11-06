@@ -296,14 +296,19 @@ if uploaded:
             # Ascending CDF
             fig.add_trace(go.Scatter(x=sorted_val, y=cdf_y, mode="lines", line=dict(color="#f28e2b", width=3)), row=1, col=2)
             # Descending CDF
-            fig.add_trace(go.Scatter(x=sorted_val, y=exceedance, mode="lines", line=dict(color="#59a14f", width=3)), row=2, col=1)
+            fig.add_trace(go.Scatter(x=sorted_val, y=exceedance, mode="lines", line=dict(color="#59a14f", width=3), name="Exceedance"), row=2, col=1)
             # Log Histogram
             fig.add_trace(go.Histogram(x=stoiip, nbinsx=80, name="Log", marker_color="#e15759"), row=2, col=2)
 
             # P10/P50/P90 lines
             for val, label, color in [(p90, "P90", "#59a14f"), (p50, "P50", "#f28e2b"), (p10, "P10", "#e15759")]:
                 fig.add_vline(x=val, line=dict(dash="dash", color=color), annotation_text=f"{label}: {fmt.format(val)}", row=1, col=2)
-                fig.add_vline(x=val, line=dict(dash="dash", color=color), annotation_text=f"{label}: {fmt.format(val)}", row=2, col=1)
+                fig.add_vline(x=val, line=dict(dash="dash", color=color), row=2, col=1)
+                # Add to legend
+                fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', 
+                                        line=dict(color=color, width=2, dash='dash'),
+                                        name=f"{label}: {fmt.format(val)} {unit}",
+                                        showlegend=True), row=2, col=1)
 
             fig.update_layout(height=800, showlegend=False)
             fig.update_xaxes(tickformat=f".{decimals}e")
