@@ -96,7 +96,7 @@ if uploaded:
         st.write(f"Swi: {swi:.3f} | Bo: {bo:.3f}")
 
     # ------------------------------------------------------------------ #
-    # 2. Auto-detect distributions for Porosity & N/G
+    # 2. Auto-detect distributions
     # ------------------------------------------------------------------ #
     st.markdown("---")
     st.subheader("Detected Input Distributions")
@@ -138,7 +138,7 @@ if uploaded:
         st.markdown(f"**Net-to-Gross (N/G):** `{ntg_dist}` \n_{ntg_reason}_")
 
     # ------------------------------------------------------------------ #
-    # 3. Volumetric Formula (UI Only)
+    # 3. Volumetric Formula
     # ------------------------------------------------------------------ #
     st.markdown("---")
     st.latex(r"\text{STOIIP} = \frac{\text{GRV} \times \text{N/G} \times \phi \times (1 - S_{wi})}{B_o}")
@@ -204,46 +204,31 @@ if uploaded:
             stoiip = stoiip_m3 * (6.289811 if output_unit.startswith("Barrels") else 1)
             unit = "STB" if "Barrels" in output_unit else "m³"
 
-            # P10 low, P50 median, P90 high
             p10 = np.percentile(stoiip, 10)
             p50 = np.percentile(stoiip, 50)
             p90 = np.percentile(stoiip, 90)
 
-            # ----------------------------------------------------------------
-            # Store fitted parameters for the report
-            # ----------------------------------------------------------------
-            def get_dist_params(dist, data):
-                if dist == "Normal":
-                    mu, sigma = stats.norm.fit(data)
-                    return f"μ = {mu:.4f}, σ = {sigma:.4f}"
-                if dist == "Uniform":
-                    return f"min = {data.min():.4f}, max = {data.max():.4f}"
-                if dist == "Triangular":
-                    try:
-                        c, loc, scale = stats.triang.fit(data)
-                        mode = loc + c * scale
-                        return f"min = {loc:.4f}, mode = {mode:.4f}, max = {loc + scale:.4f}"
-                    except:
-                        mode = (data.min() + data.max()) / 2
-                        return f"min = {data.min():.4f}, mode = {mode:.4f}, max = {data.max():.4f}"
-                return "unknown"
+            # Store results in session state
+            st.session_state.results = {
+                "stoiip": stoiip,
+                "phi": phi,
+                "ntg": ntg,
+                "grv": grv,
+                "p10": p10, "p50": p50, "p90": p90,
+                "unit": unit,
+                "phi_dist": phi_dist, "ntg_dist": ntg_dist, "grv_dist": grv_dist,
+                "phi_params": draw.__code__.co_varnames,  # placeholder
+                "iterations": iterations,
+                "swi": swi, "bo": bo,
+                "gmin": gmin, "gmax": gmax,
+                "output_unit": output_unit,
+                "decimals": decimals
+            }
 
-            phi_params = get_dist_params(phi_dist, porosity)
-            ntg_params = get_dist_params(ntg_dist, ntg)
-
-            grv_params = {
-                "Uniform": f"min = {gmin:.2e}, max = {gmax:.2e}",
-                "Triangular": f"min = {gmin:.2e}, mode = {(gmin + gmax) / 2:.2e}, max = {gmax:.2e}",
-                "Normal": f"μ = {(gmin + gmax) / 2:.2e}, σ = {(gmax - gmin) / 6:.2e}"
-            }[grv_dist]
-
-            # ----------------------------------------------------------------
-            # Example realisation (fixed seed for reproducibility)
-            # ----------------------------------------------------------------
+            # Example realisation
             example_rng = np.random.default_rng(42)
             phi_ex = np.clip(draw(phi_dist, porosity, 1, example_rng), 0.001, 0.99)[0]
             ntg_ex = np.clip(draw(ntg_dist, ntg, 1, example_rng), 0.001, 1.0)[0]
-
             if grv_dist == "Uniform":
                 grv_ex = example_rng.uniform(gmin, gmax)
             elif grv_dist == "Triangular":
@@ -253,13 +238,18 @@ if uploaded:
                 mean = (gmin + gmax) / 2
                 std = (gmax - gmin) / 6
                 grv_ex = np.clip(example_rng.normal(mean, std), gmin, gmax)
-
             net_vol_ex = grv_ex * ntg_ex
             hc_vol_ex = net_vol_ex * phi_ex * (1 - swi)
             stoiip_m3_ex = hc_vol_ex / bo
             stoiip_ex = stoiip_m3_ex * (6.289811 if output_unit.startswith("Barrels") else 1)
 
+            st.session_state.example = {
+                "phi_ex": phi_ex, "ntg_ex": ntg_ex, "grv_ex": grv_ex,
+                "stoiip_ex": stoiip_ex, "unit": unit
+            }
+
         st.success("Simulation Complete!")
+        st.session_state.simulation_run = True
 
         # ----------------------------------------------------------------
         # 6. Results
@@ -270,9 +260,7 @@ if uploaded:
         col2.metric("P50 (Median)", f"{fmt.format(p50)} {unit}")
         col3.metric("P90 (High)", f"{fmt.format(p90)} {unit}")
 
-        # --------------------------------------------------------------
-        # Example of One Random Realisation
-        # --------------------------------------------------------------
+        # Example realisation
         st.markdown("---")
         st.subheader("Example of One Random Realisation")
         st.latex(
@@ -289,12 +277,6 @@ if uploaded:
         sorted_val = np.sort(stoiip)
         cdf_y = np.linspace(0, 1, len(sorted_val))
         exceedance = 1 - cdf_y
-
-        def fig_to_png(fig):
-            buf = BytesIO()
-            fig.savefig(buf, format='png', dpi=300, bbox_inches='tight')
-            buf.seek(0)
-            return buf
 
         if "Plotly" in plot_engine:
             fig = make_subplots(
@@ -316,9 +298,6 @@ if uploaded:
             fig.update_xaxes(tickformat=f".{decimals}e")
             fig.update_xaxes(type="log", row=2, col=2)
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            # Matplotlib version omitted for brevity — you can keep your original code here
-            st.info("Matplotlib plots are available in the original version.")
 
         # ----------------------------------------------------------------
         # 8. Download Results
@@ -329,94 +308,117 @@ if uploaded:
             "N/G": np.round(ntg, 4),
             "GRV (m³)": grv.astype(int)
         })
-        st.download_button("Download Results CSV", results_df.to_csv(index=False), "monte_carlo_results.csv")
+        csv_data = results_df.to_csv(index=False).encode()
+        st.download_button("Download Results CSV", csv_data, "monte_carlo_results.csv", "text/csv")
 
         # ----------------------------------------------------------------
-        # 9. FULL REPORT GENERATION
+        # 9. FULL REPORT — SHOWS IMMEDIATELY AFTER GRAPHS
         # ----------------------------------------------------------------
         st.markdown("---")
-        st.subheader("📄 Generate Full Project Report")
+        st.subheader("Project Report (Ready to Submit)")
 
-        if st.button("Download Complete Report (TXT → Word → PDF)", use_container_width=True):
-            report = []
+        def get_dist_params(dist, data):
+            if dist == "Normal":
+                mu, sigma = stats.norm.fit(data)
+                return f"μ = {mu:.4f}, σ = {sigma:.4f}"
+            if dist == "Uniform":
+                return f"min = {data.min():.4f}, max = {data.max():.4f}"
+            if dist == "Triangular":
+                try:
+                    c, loc, scale = stats.triang.fit(data)
+                    mode = loc + c * scale
+                    return f"min = {loc:.4f}, mode = {mode:.4f}, max = {loc + scale:.4f}"
+                except:
+                    mode = (data.min() + data.max()) / 2
+                    return f"min = {data.min():.4f}, mode = {mode:.4f}, max = {data.max():.4f}"
+            return "unknown"
 
-            report.append("=" * 70)
-            report.append("GRADUATION DESIGN PROJECT – VOLUMETRIC HCIP ESTIMATION")
-            report.append("Reservoir Hydrocarbon-in-Place Under Uncertainty")
-            report.append(f"Generated: {datetime.now().strftime('%d %B %Y %H:%M')}")
-            report.append("=" * 70)
-            report.append("")
+        phi_params = get_dist_params(phi_dist, porosity)
+        ntg_params = get_dist_params(ntg_dist, ntg)
+        grv_params = {
+            "Uniform": f"min = {gmin:.2e}, max = {gmax:.2e}",
+            "Triangular": f"min = {gmin:.2e}, mode = {(gmin + gmax) / 2:.2e}, max = {gmax:.2e}",
+            "Normal": f"μ = {(gmin + gmax) / 2:.2e}, σ = {(gmax - gmin) / 6:.2e}"
+        }[grv_dist]
 
-            # 1. Input summary
-            report.append("## 1. INPUT DATA")
-            report.append(f"Porosity samples : {len(porosity)} (mean = {porosity.mean():.4f})")
-            report.append(f"N/G samples      : {len(ntg)} (mean = {ntg.mean():.4f})")
-            report.append(f"GRV range        : {gross_min:.2e} – {gross_max:.2e} m³")
-            report.append(f"Swi = {swi:.3f} | Bo = {bo:.3f}")
-            report.append("")
+        report = []
+        report.append("=" * 70)
+        report.append("GRADUATION DESIGN PROJECT – VOLUMETRIC HCIP ESTIMATION")
+        report.append("Reservoir Hydrocarbon-in-Place Under Uncertainty")
+        report.append(f"Generated: {datetime.now().strftime('%d %B %Y %H:%M')}")
+        report.append("=" * 70)
+        report.append("")
 
-            # 2. Fitted distributions
-            report.append("## 2. FITTED DISTRIBUTIONS")
-            report.append(f"Porosity (ϕ) → {phi_dist}   ({phi_params})")
-            report.append(f"N/G          → {ntg_dist}   ({ntg_params})")
-            report.append(f"GRV          → {grv_dist}   ({grv_params})")
-            report.append("")
+        report.append("## 1. INPUT DATA")
+        report.append(f"Porosity samples : {len(porosity)} (mean = {porosity.mean():.4f})")
+        report.append(f"N/G samples      : {len(ntg)} (mean = {ntg.mean():.4f})")
+        report.append(f"GRV range        : {gross_min:.2e} – {gross_max:.2e} m³")
+        report.append(f"Swi = {swi:.3f} | Bo = {bo:.3f}")
+        report.append("")
 
-            # 3. Monte Carlo
-            report.append("## 3. MONTE CARLO SETTINGS")
-            report.append(f"Iterations: {iterations:,}")
-            report.append(f"Output unit: {unit}")
-            report.append("")
+        report.append("## 2. FITTED DISTRIBUTIONS")
+        report.append(f"Porosity (ϕ) → {phi_dist}   ({phi_params})")
+        report.append(f"N/G          → {ntg_dist}   ({ntg_params})")
+        report.append(f"GRV          → {grv_dist}   ({grv_params})")
+        report.append("")
 
-            # 4. Results
-            report.append("## 4. RESULTS (Descending CDF)")
-            report.append(f"P10 (Low)    : {fmt.format(p10)} {unit}")
-            report.append(f"P50 (Median) : {fmt.format(p50)} {unit}")
-            report.append(f"P90 (High)   : {fmt.format(p90)} {unit}")
-            report.append("")
+        report.append("## 3. MONTE CARLO SETTINGS")
+        report.append(f"Iterations: {iterations:,}")
+        report.append(f"Output unit: {unit}")
+        report.append("")
 
-            # 5. Example
-            report.append("## 5. EXAMPLE REALISATION")
-            report.append(rf"STOIIP = {stoiip_ex:.{decimals}e} {unit}")
-            report.append("")
+        report.append("## 4. RESULTS (Descending CDF)")
+        report.append(f"P10 (Low)    : {fmt.format(p10)} {unit}")
+        report.append(f"P50 (Median) : {fmt.format(p50)} {unit}")
+        report.append(f"P90 (High)   : {fmt.format(p90)} {unit}")
+        report.append("")
 
-            # 6. LITERATURE SURVEY
-            report.append("## 6. LITERATURE SURVEY")
-            report.append("")
-            report.append("Volumetric HCIP uses the standard formula:")
-            report.append(r"$$ \text{STOIIP} = \frac{GRV \times N/G \times \phi \times (1-S_{wi})}{B_o} $$")
-            report.append("")
-            report.append("Monte Carlo simulation with ≥10 000 iterations is the industry-standard for early-stage uncertainty (SPE PRMS 2018).")
-            report.append("")
-            report.append("**PRMS definitions:**")
-            report.append("- P90 = High estimate (90 % probability exceeded)")
-            report.append("- P50 = Median")
-            report.append("- P10 = Low estimate")
-            report.append("")
-            report.append("**Common distributions:**")
-            report.append("- Porosity: Triangular or Normal")
-            report.append("- N/G: Triangular / Beta")
-            report.append("- GRV: Uniform or Triangular when only min-max known")
-            report.append("")
-            report.append("**References:**")
-            report.append("- SPE-187456-MS (PRMS 2018)")
-            report.append("- SPE-113795-MS (Monte Carlo HCIIP)")
-            report.append("- Etherington & Ritter (2007)")
+        report.append("## 5. EXAMPLE REALISATION")
+        report.append(rf"STOIIP = {stoiip_ex:.{decimals}e} {unit}")
+        report.append("")
 
-            report.append("")
-            report.append("=" * 70)
-            report.append("END OF REPORT")
-            report.append("=" * 70)
+        report.append("## 6. LITERATURE SURVEY")
+        report.append("Volumetric HCIP uses the standard formula:")
+        report.append(r"$$ \text{STOIIP} = \frac{GRV \times N/G \times \phi \times (1-S_{wi})}{B_o} $$")
+        report.append("")
+        report.append("Monte Carlo simulation with ≥10 000 iterations is the industry-standard for early-stage uncertainty (SPE PRMS 2018).")
+        report.append("")
+        report.append("**PRMS definitions:**")
+        report.append("- P90 = High estimate (90 % probability exceeded)")
+        report.append("- P50 = Median")
+        report.append("- P10 = Low estimate")
+        report.append("")
+        report.append("**Common distributions:**")
+        report.append("- Porosity: Triangular or Normal")
+        report.append("- N/G: Triangular / Beta")
+        report.append("- GRV: Uniform or Triangular when only min-max known")
+        report.append("")
+        report.append("**References:**")
+        report.append("- SPE-187456-MS (PRMS 2018)")
+        report.append("- SPE-113795-MS (Monte Carlo HCIIP)")
+        report.append("- Etherington & Ritter (2007)")
 
-            report_text = "\n".join(report)
+        report.append("")
+        report.append("=" * 70)
+        report.append("END OF REPORT")
+        report.append("=" * 70)
 
-            st.download_button(
-                label="📥 DOWNLOAD FULL REPORT",
-                data=report_text,
-                file_name=f"HCIP_Report_{datetime.now().strftime('%Y%m%d')}.txt",
-                mime="text/plain"
-            )
-            st.success("Report generated! Open in Word → Save as PDF → Submit.")
+        report_text = "\n".join(report)
+
+        # Show report in expandable box
+        with st.expander("View Full Report (Click to Expand)", expanded=False):
+            st.code(report_text, language="text")
+
+        # Download button always visible
+        st.download_button(
+            label="DOWNLOAD REPORT (TXT → Word → PDF)",
+            data=report_text,
+            file_name=f"HCIP_Report_{datetime.now().strftime('%Y%m%d')}.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+
+        st.success("Report is ready below and available for download!")
 
 else:
     st.info("Upload your reservoir CSV/Excel file to begin.")
