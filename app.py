@@ -5,6 +5,7 @@ from scipy import stats
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
+from io import BytesIO
 
 st.set_page_config(page_title="OOIP/STOIIP Monte Carlo", layout="wide")
 st.title("OOIP/STOIIP Monte Carlo Estimator")
@@ -125,7 +126,7 @@ if uploaded:
     with col1:
         st.markdown(f"**Porosity (ϕ):** `{phi_dist}` \n_{phi_reason}_")
     with col2:
-        st.markdown(f"**Net-to-Gross (N/G):** `{ntg_dist}` \n_{phi_reason}_")
+        st.markdown(f"**Net-to-Gross (N/G):** `{ntg_dist}` \n_{ntg_reason}_")
 
     # ------------------------------------------------------------------ #
     # 3. Volumetric Formula (UI Only)
@@ -252,7 +253,7 @@ if uploaded:
         )
 
         # ----------------------------------------------------------------
-        # 7. Plots: Histogram + Ascending CDF + Descending CDF
+        # 7. Plots: Individual High-Res Downloads
         # ----------------------------------------------------------------
         st.markdown("---")
         st.subheader("STOIIP Distribution Analysis")
@@ -260,6 +261,13 @@ if uploaded:
         sorted_val = np.sort(stoiip)
         cdf_y = np.linspace(0, 1, len(sorted_val))
         exceedance = 1 - cdf_y
+
+        # Helper to save figure to PNG in memory
+        def fig_to_png(fig):
+            buf = BytesIO()
+            fig.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+            buf.seek(0)
+            return buf
 
         if "Plotly" in plot_engine:
             fig = make_subplots(
@@ -279,21 +287,14 @@ if uploaded:
 
             for val, label, color in [(p90, "P90", "#59a14f"), (p50, "P50", "#f28e2b"), (p10, "P10", "#e15759")]:
                 val_str = fmt.format(val)
-                # Ascending CDF
                 fig.add_vline(x=val, line=dict(dash="dash", color=color),
                               annotation_text=f"{label}: {val_str}", row=1, col=2)
-                # Descending CDF — same style as ascending
                 fig.add_vline(x=val, line=dict(dash="dash", color=color),
                               annotation_text=f"{label}: {val_str}",
-                              annotation_position="top",
-                              row=2, col=1)
-
-                fig.add_trace(go.Scatter(
-                    x=[None], y=[None], mode='lines',
-                    line=dict(dash='dash', color=color),
-                    name=f"{label}: {val_str} {unit}",
-                    showlegend=True
-                ))
+                              annotation_position="top", row=2, col=1)
+                fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines',
+                                        line=dict(dash='dash', color=color),
+                                        name=f"{label}: {val_str} {unit}", showlegend=True))
 
             fig.update_layout(height=900,
                               legend=dict(orientation="h", yanchor="top", y=-0.05, xanchor="left", x=0.0,
@@ -302,43 +303,60 @@ if uploaded:
             fig.update_xaxes(type="log", row=2, col=2)
             st.plotly_chart(fig, use_container_width=True)
 
-        else:  # Matplotlib
-            fig, axs = plt.subplots(2, 2, figsize=(14, 10))
-            axs[0,0].hist(stoiip, bins=80, color="#4e79a7", edgecolor="black")
-            axs[0,0].set_title("Histogram")
-            axs[0,0].set_xlabel(f"STOIIP ({unit})")
-            axs[0,0].set_ylabel("Frequency")
+        else:  # Matplotlib — now 4 separate high-res downloadable plots
+            # Plot 1: Histogram
+            fig1, ax1 = plt.subplots(figsize=(8, 6), dpi=300)
+            ax1.hist(stoiip, bins=80, color="#4e79a7", edgecolor="black")
+            ax1.set_title("Histogram")
+            ax1.set_xlabel(f"STOIIP ({unit})")
+            ax1.set_ylabel("Frequency")
+            st.pyplot(fig1)
+            buf1 = fig_to_png(fig1)
+            st.download_button("Download Histogram", buf1, "histogram.png", "image/png")
 
-            axs[0,1].plot(sorted_val, cdf_y, color="#f28e2b", lw=3)
-            axs[0,1].set_title("Ascending CDF")
-            axs[0,1].set_xlabel(f"STOIIP ({unit})")
-            axs[0,1].set_ylabel("Cumulative Probability")
-
-            axs[1,0].plot(sorted_val, exceedance, color="#59a14f", lw=3)
-            axs[1,0].set_title("Descending CDF (Exceedance)")
-            axs[1,0].set_xlabel(f"STOIIP ({unit})")
-            axs[1,0].set_ylabel("Exceedance Probability")
-
-            axs[1,1].hist(stoiip, bins=80, color="#e15759", edgecolor="black", log=True)
-            axs[1,1].set_title("Log-Scale Histogram")
-            axs[1,1].set_xlabel(f"STOIIP ({unit})")
-            axs[1,1].set_xscale("log")
-
-            # Same style as original ascending CDF: vertical line + rotated text
+            # Plot 2: Ascending CDF
+            fig2, ax2 = plt.subplots(figsize=(8, 6), dpi=300)
+            ax2.plot(sorted_val, cdf_y, color="#f28e2b", lw=3)
+            ax2.set_title("Ascending CDF")
+            ax2.set_xlabel(f"STOIIP ({unit})")
+            ax2.set_ylabel("Cumulative Probability")
             for val, label, color in [(p90, "P90", "#59a14f"), (p50, "P50", "#f28e2b"), (p10, "P10", "#e15759")]:
                 val_str = f"{val:.{decimals}e}"
-                # Ascending CDF
-                axs[0,1].axvline(val, color=color, linestyle="--", linewidth=1.5)
-                axs[0,1].text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
-                # Descending CDF — same style
-                axs[1,0].axvline(val, color=color, linestyle="--", linewidth=1.5)
-                axs[1,0].text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+                ax2.axvline(val, color=color, linestyle="--", linewidth=1.5)
+                ax2.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+            st.pyplot(fig2)
+            buf2 = fig_to_png(fig2)
+            st.download_button("Download Ascending CDF", buf2, "ascending_cdf.png", "image/png")
 
-            plt.tight_layout()
-            st.pyplot(fig)
+            # Plot 3: Descending CDF
+            fig3, ax3 = plt.subplots(figsize=(8, 6), dpi=300)
+            ax3.plot(sorted_val, exceedance, color="#59a14f", lw=3)
+            ax3.set_title("Descending CDF (Exceedance)")
+            ax3.set_xlabel(f"STOIIP ({unit})")
+            ax3.set_ylabel("Exceedance Probability")
+            for val, label, color in [(p90, "P90", "#59a14f"), (p50, "P50", "#f28e2b"), (p10, "P10", "#e15759")]:
+                val_str = f"{val:.{decimals}e}"
+                ax3.axvline(val, color=color, linestyle="--", linewidth=1.5)
+                ax3.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+            st.pyplot(fig3)
+            buf3 = fig_to_png(fig3)
+            st.download_button("Download Descending CDF", buf3, "descending_cdf.png", "image/png")
+
+            # Plot 4: Log Histogram
+            fig4, ax4 = plt.subplots(figsize=(8, 6), dpi=300)
+            ax4.hist(stoiip, bins=80, color="#e15759", edgecolor="black", log=True)
+            ax4.set_title("Log-Scale Histogram")
+            ax4.set_xlabel(f"STOIIP ({unit})")
+            ax4.set_xscale("log")
+            st.pyplot(fig4)
+            buf4 = fig_to_png(fig4)
+            st.download_button("Download Log Histogram", buf4, "log_histogram.png", "image/png")
+
+            # Close all figures to free memory
+            plt.close('all')
 
         # ----------------------------------------------------------------
-        # 8. Download
+        # 8. Download Results
         # ----------------------------------------------------------------
         results_df = pd.DataFrame({
             f"STOIIP ({unit})": np.round(stoiip, decimals),
