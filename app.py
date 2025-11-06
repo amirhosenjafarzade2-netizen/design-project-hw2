@@ -150,7 +150,7 @@ if uploaded:
     with col3:
         plot_engine = st.radio("Plotting engine", ["Plotly (interactive)", "Matplotlib (static)"], horizontal=True)
 
-    # GRV distribution (no perturbation)
+    # GRV distribution
     st.markdown("**Gross Rock Volume (GRV) Distribution**")
     grv_dist = st.selectbox("Select GRV distribution", ["Uniform", "Triangular", "Normal"], index=0)
 
@@ -164,11 +164,9 @@ if uploaded:
         with st.spinner("Simulating..."):
             rng = np.random.default_rng()
 
-            # Fixed GRV bounds (no perturbation)
             gmin = gross_min
             gmax = gross_max
 
-            # Draw ϕ and N/G
             def draw(dist, data, size):
                 if dist == "Normal":
                     mu, sigma = stats.norm.fit(data)
@@ -183,7 +181,6 @@ if uploaded:
             phi = np.clip(draw(phi_dist, porosity, iterations), 0.001, 0.99)
             ntg = np.clip(draw(ntg_dist, ntg, iterations), 0.001, 1.0)
 
-            # GRV
             if grv_dist == "Uniform":
                 grv = rng.uniform(gmin, gmax, iterations)
             elif grv_dist == "Triangular":
@@ -194,14 +191,12 @@ if uploaded:
                 std = (gmax - gmin) / 6
                 grv = np.clip(rng.normal(mean, std, iterations), gmin, gmax)
 
-            # Volumetric
             net_vol = grv * ntg
             hc_vol = net_vol * phi * (1 - swi)
             stoiip_m3 = hc_vol / bo
             stoiip = stoiip_m3 * (6.289811 if output_unit.startswith("Barrels") else 1)
             unit = "STB" if "Barrels" in output_unit else "m³"
 
-            # Percentiles
             p90 = np.percentile(stoiip, 10)
             p50 = np.percentile(stoiip, 50)
             p10 = np.percentile(stoiip, 90)
@@ -218,46 +213,84 @@ if uploaded:
         col3.metric("P90 (Low)", f"{fmt.format(p90)} {unit}")
 
         # ----------------------------------------------------------------
-        # 7. Plotting (User Choice)
+        # 7. Plots: Histogram + Ascending CDF + Descending CDF
         # ----------------------------------------------------------------
         st.markdown("---")
-        st.subheader("Descending Cumulative Distribution (Exceedance)")
+        st.subheader("STOIIP Distribution Analysis")
 
         sorted_val = np.sort(stoiip)
-        exceedance = 1 - np.linspace(0, 1, len(sorted_val))
+        cdf_y = np.linspace(0, 1, len(sorted_val))
+        exceedance = 1 - cdf_y
 
         if "Plotly" in plot_engine:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=sorted_val, y=exceedance, mode='lines', name='Exceedance',
-                                    line=dict(color='green', width=3)))
-            fig.add_trace(go.Scatter(x=[p10, p10], y=[0, 0.1], mode='lines', line=dict(dash='dash', color='red'),
-                                    name='P10'))
-            fig.add_trace(go.Scatter(x=[p50, p50], y=[0, 0.5], mode='lines', line=dict(dash='dash', color='blue'),
-                                    name='P50'))
-            fig.add_trace(go.Scatter(x=[p90, p90], y=[0, 0.9], mode='lines', line=dict(dash='dash', color='green'),
-                                    name='P90'))
-            fig.update_layout(
-                title="Descending CDF (Exceedance Probability)",
-                xaxis_title=f"STOIIP ({unit})",
-                yaxis_title="Probability of Exceedance",
-                xaxis=dict(tickformat=f".{decimals}e"),
-                height=600
+            fig = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=(
+                    "Histogram",
+                    "Ascending CDF",
+                    "Descending CDF (Exceedance)",
+                    "Log-Scale Histogram"
+                )
             )
+
+            # Histogram
+            fig.add_trace(go.Histogram(x=stoiip, nbinsx=80, name="STOIIP", marker_color="#4e79a7"), row=1, col=1)
+
+            # Ascending CDF
+            fig.add_trace(go.Scatter(x=sorted_val, y=cdf_y, mode="lines", line=dict(color="#f28e2b", width=3)), row=1, col=2)
+
+            # Descending CDF
+            fig.add_trace(go.Scatter(x=sorted_val, y=exceedance, mode="lines", line=dict(color="#59a14f", width=3)), row=2, col=1)
+
+            # Log Histogram
+            fig.add_trace(go.Histogram(x=stoiip, nbinsx=80, name="Log", marker_color="#e15759"), row=2, col=2)
+
+            # P10/P50/P90 lines
+            for val, label, color in [(p90, "P90", "#59a14f"), (p50, "P50", "#f28e2b"), (p10, "P10", "#e15759")]:
+                fig.add_vline(x=val, line=dict(dash="dash", color=color), annotation_text=f"{label}: {fmt.format(val)}", row=1, col=2)
+                fig.add_vline(x=val, line=dict(dash="dash", color=color), annotation_text=f"{label}: {fmt.format(val)}", row=2, col=1)
+
+            fig.update_layout(height=800, showlegend=False)
+            fig.update_xaxes(tickformat=f".{decimals}e")
+            fig.update_xaxes(type="log", row=2, col=2)
             st.plotly_chart(fig, use_container_width=True)
 
         else:  # Matplotlib
-            plt.figure(figsize=(10, 6))
-            plt.plot(sorted_val, exceedance, color='green', linewidth=3, label='Exceedance')
-            plt.axvline(p10, color='red', linestyle='--', label=f'P10: {fmt.format(p10)}')
-            plt.axvline(p50, color='blue', linestyle='--', label=f'P50: {fmt.format(p50)}')
-            plt.axvline(p90, color='green', linestyle='--', label=f'P90: {fmt.format(p90)}')
-            plt.xlabel(f"STOIIP ({unit})")
-            plt.ylabel("Probability of Exceedance")
-            plt.title("Descending Cumulative Distribution")
-            plt.legend()
-            plt.grid(True, linestyle='--', alpha=0.7)
-            plt.gca().ticklabel_format(axis='x', style='sci', scilimits=(0,0))
-            st.pyplot(plt)
+            fig, axs = plt.subplots(2, 2, figsize=(14, 10))
+
+            # Histogram
+            axs[0,0].hist(stoiip, bins=80, color="#4e79a7", edgecolor="black")
+            axs[0,0].set_title("Histogram")
+            axs[0,0].set_xlabel(f"STOIIP ({unit})")
+            axs[0,0].set_ylabel("Frequency")
+
+            # Ascending CDF
+            axs[0,1].plot(sorted_val, cdf_y, color="#f28e2b", lw=3)
+            axs[0,1].set_title("Ascending CDF")
+            axs[0,1].set_xlabel(f"STOIIP ({unit})")
+            axs[0,1].set_ylabel("Cumulative Probability")
+
+            # Descending CDF
+            axs[1,0].plot(sorted_val, exceedance, color="#59a14f", lw=3)
+            axs[1,0].set_title("Descending CDF (Exceedance)")
+            axs[1,0].set_xlabel(f"STOIIP ({unit})")
+            axs[1,0].set_ylabel("Exceedance Probability")
+
+            # Log Histogram
+            axs[1,1].hist(stoiip, bins=80, color="#e15759", edgecolor="black", log=True)
+            axs[1,1].set_title("Log-Scale Histogram")
+            axs[1,1].set_xlabel(f"STOIIP ({unit})")
+            axs[1,1].set_xscale("log")
+
+            # P10/P50/P90 markers
+            for val, label, color in [(p90, "P90", "#59a14f"), (p50, "P50", "#f28e2b"), (p10, "P10", "#e15759")]:
+                val_str = f"{val:.{decimals}e}"
+                axs[0,1].axvline(val, color=color, linestyle="--", linewidth=1.5)
+                axs[0,1].text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+                axs[1,0].axvline(val, color=color, linestyle="--", linewidth=1.5)
+
+            plt.tight_layout()
+            st.pyplot(fig)
 
         # ----------------------------------------------------------------
         # 8. Download
