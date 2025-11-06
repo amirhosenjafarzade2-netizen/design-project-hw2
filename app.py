@@ -297,7 +297,7 @@ if uploaded:
             # Plot 3: Descending CDF
             fig3, ax3 = plt.subplots(figsize=(8, 6), dpi=300)
             ax3.plot(sorted_val, exceedance, color="#59a14f", lw=3)
-            ax3.set_title("Descending CDF (Exceedance)")
+            ax3.set_title("Descending CDF")
             ax3.set_xlabel(f"STOIIP ({unit})")
             ax3.set_ylabel("Exceedance Probability")
             for val, label, color in [(p10, "P10", "#59a14f"), (p50, "P50", "#f28e2b"), (p90, "P90", "#e15759")]:
