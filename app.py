@@ -25,7 +25,6 @@ if uploaded:
         raw = pd.read_csv(uploaded, header=None, dtype=str, na_filter=False)
     else:
         raw = pd.read_excel(uploaded, header=None, dtype=str, na_filter=False)
-
     header_row = None
     for i in range(len(raw)):
         if "porosity" in raw.iloc[i].astype(str).str.lower().values:
@@ -34,7 +33,6 @@ if uploaded:
     if header_row is None:
         st.error("Could not find header row with 'Porosity'.")
         st.stop()
-
     header = raw.iloc[header_row].astype(str).str.strip()
     meta_row = raw.iloc[header_row + 1].astype(str).str.strip()
     data_rows = raw.iloc[header_row + 2:].reset_index(drop=True).astype(str).apply(lambda x: x.str.strip())
@@ -75,9 +73,7 @@ if uploaded:
         # Determine unit from filename or default
         unit = "STB" if "stb" in uploaded.name.lower() else "m³"
 
-        # ------------------------------------------------------------------ #
         # Ask for decimal places BEFORE plotting
-        # ------------------------------------------------------------------ #
         st.markdown("---")
         decimals = st.slider("Decimal places on chart labels & results", 0, 10, 3, key="reverse_cdf_decimals")
 
@@ -88,7 +84,7 @@ if uploaded:
         fmt = f"{{:.{decimals}e}}"
 
         # ------------------------------------------------------------------ #
-        # Matplotlib Descending CDF (Exceedance) Plot
+        # FIXED: Matplotlib Descending CDF (Exceedance) Plot - Reversed X-axis, Correct P10/P90
         # ------------------------------------------------------------------ #
         st.subheader("Descending CDF (Exceedance) - OOIP Only")
         fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
@@ -97,9 +93,14 @@ if uploaded:
         ax.set_xlabel(f"OOIP ({unit})")
         ax.set_ylabel("Exceedance Probability")
 
-        for val, label, color in [(p10, "P10", "#59a14f"), (p50, "P50", "#f28e2b"), (p90, "P90", "#e15759")]:
+        # Reverse x-axis
+        ax.invert_xaxis()
+
+        # Add P10, P50, P90 with correct placement and labels
+        for val, label, color in [(p90, "P90", "#e15759"), (p50, "P50", "#f28e2b"), (p10, "P10", "#59a14f")]:
             val_str = fmt.format(val)
             ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
+            # Place text to the right of the line (since x is reversed, "right" is lower value side)
             ax.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
 
         st.pyplot(fig)
@@ -118,7 +119,6 @@ if uploaded:
         # Download OOIP values
         results_df = pd.DataFrame({"OOIP": ooip_values})
         st.download_button("Download OOIP Values", results_df.to_csv(index=False), "ooip_values.csv")
-
         st.stop()
 
     # ------------------------------------------------------------------ #
@@ -243,7 +243,7 @@ if uploaded:
 
     st.markdown("**Gross Rock Volume (GRV) Distribution**")
     grv_dist = st.selectbox("Select GRV distribution", ["Uniform", "Triangular", "Normal"], index=0)
-    decimals = st.slider("Decimal places on charts & results", 0, 10, 3)  # Now 0–10
+    decimals = st.slider("Decimal places on charts & results", 0, 10, 3)
 
     # ------------------------------------------------------------------ #
     # 5. Run Simulation
@@ -311,6 +311,7 @@ if uploaded:
         example_rng = np.random.default_rng(42)
         phi_ex = np.clip(draw(phi_dist, porosity, 1, example_rng), 0.001, 0.99)[0]
         ntg_ex = np.clip(draw(ntg_dist, ntg, 1, example_rng), 0.001, 1.0)[0]
+
         if grv_dist == "Uniform":
             grv_ex = example_rng.uniform(gmin, gmax)
         elif grv_dist == "Triangular":
@@ -413,19 +414,25 @@ if uploaded:
                 val_str = f"{val:.{decimals}e}"
                 ax2.axvline(val, color=color, linestyle="--", linewidth=1.5)
                 ax2.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+            2
             st.pyplot(fig2)
             buf2 = fig_to_png(fig2)
             st.download_button("Download Ascending CDF", buf2, "ascending_cdf.png", "image/png")
 
+            # FIXED: Matplotlib Descending CDF - Reversed X-axis + Correct P10/P90
             fig3, ax3 = plt.subplots(figsize=(8, 6), dpi=300)
             ax3.plot(sorted_val, exceedance, color="#59a14f", lw=3)
             ax3.set_title("Descending CDF")
             ax3.set_xlabel(f"STOIIP ({unit})")
             ax3.set_ylabel("Exceedance Probability")
-            for val, label, color in [(p10, "P10", "#59a14f"), (p50, "P50", "#f28e2b"), (p90, "P90", "#e15759")]:
+            ax3.invert_xaxis()  # Reverse x-axis
+
+            # P90 on left (high value), P10 on right (low value)
+            for val, label, color in [(p90, "P90", "#e15759"), (p50, "P50", "#f28e2b"), (p10, "P10", "#59a14f")]:
                 val_str = f"{val:.{decimals}e}"
                 ax3.axvline(val, color=color, linestyle="--", linewidth=1.5)
                 ax3.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+
             st.pyplot(fig3)
             buf3 = fig_to_png(fig3)
             st.download_button("Download Descending CDF", buf3, "descending_cdf.png", "image/png")
@@ -458,6 +465,5 @@ P90 (High): {fmt.format(p90)} {unit}
 ϕ ~ {phi_dist} | N/G ~ {ntg_dist} | GRV ~ {grv_dist}
 Iterations: {iterations:,}
 """, "summary.txt")
-
 else:
     st.info("Upload your reservoir CSV/Excel file to begin.")
