@@ -84,24 +84,26 @@ if uploaded:
         fmt = f"{{:.{decimals}e}}"
 
         # ------------------------------------------------------------------ #
-        # FIXED: Matplotlib Descending CDF (Exceedance) Plot - Reversed X-axis, Correct P10/P90
+        # FIXED: Matplotlib Descending CDF - X reversed, curve descending, labels at origin
         # ------------------------------------------------------------------ #
         st.subheader("Descending CDF (Exceedance) - OOIP Only")
         fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
-        ax.plot(sorted_val, exceedance, color="#59a14f", lw=3)
+        
+        # Plot in correct order: high to low
+        ax.plot(sorted_val[::-1], exceedance[::-1], color="#59a14f", lw=3)
+        
         ax.set_title("Descending CDF")
         ax.set_xlabel(f"OOIP ({unit})")
         ax.set_ylabel("Exceedance Probability")
-
-        # Reverse x-axis
+        
+        # Reverse x-axis so high value is on left
         ax.invert_xaxis()
 
-        # Add P10, P50, P90 with correct placement and labels
+        # Add P90 (left), P50, P10 (right) — text at origin (left of line)
         for val, label, color in [(p90, "P90", "#e15759"), (p50, "P50", "#f28e2b"), (p10, "P10", "#59a14f")]:
             val_str = fmt.format(val)
             ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
-            # Place text to the right of the line (since x is reversed, "right" is lower value side)
-            ax.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+            ax.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='left', fontsize=9, color=color, bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
 
         st.pyplot(fig)
 
@@ -414,24 +416,23 @@ if uploaded:
                 val_str = f"{val:.{decimals}e}"
                 ax2.axvline(val, color=color, linestyle="--", linewidth=1.5)
                 ax2.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
-            2
             st.pyplot(fig2)
             buf2 = fig_to_png(fig2)
             st.download_button("Download Ascending CDF", buf2, "ascending_cdf.png", "image/png")
 
-            # FIXED: Matplotlib Descending CDF - Reversed X-axis + Correct P10/P90
+            # FIXED: Matplotlib Descending CDF - High on left, curve descending, labels at origin
             fig3, ax3 = plt.subplots(figsize=(8, 6), dpi=300)
-            ax3.plot(sorted_val, exceedance, color="#59a14f", lw=3)
+            ax3.plot(sorted_val[::-1], exceedance[::-1], color="#59a14f", lw=3)
             ax3.set_title("Descending CDF")
             ax3.set_xlabel(f"STOIIP ({unit})")
             ax3.set_ylabel("Exceedance Probability")
-            ax3.invert_xaxis()  # Reverse x-axis
+            ax3.invert_xaxis()  # High value on left
 
-            # P90 on left (high value), P10 on right (low value)
-            for val, label, color in [(p90, "P90", "#e15759"), (p50, "P50", "#f28e2b"), (p10, "P10", "#59a14f")]:
+            for val, label, color in [(p90, "P90", "#e15759"), (p50, text="P50", color="#f28e2b"), (p10, "P10", "#59a14f")]:
                 val_str = f"{val:.{decimals}e}"
                 ax3.axvline(val, color=color, linestyle="--", linewidth=1.5)
-                ax3.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+                ax3.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='left', fontsize=9, color=color,
+                         bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
 
             st.pyplot(fig3)
             buf3 = fig_to_png(fig3)
