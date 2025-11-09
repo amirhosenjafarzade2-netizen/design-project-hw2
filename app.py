@@ -68,11 +68,9 @@ if uploaded:
 
         # Sort values ascending
         sorted_val = np.sort(ooip_values)
-        exceedance = 1 - np.linspace(0, 1, len(sorted_val))  # P(exceedance)
+        exceedance = 1 - np.linspace(0, 1, len(sorted_val))
 
-        # Determine unit
         unit = "STB" if "stb" in uploaded.name.lower() else "m³"
-
         st.markdown("---")
         decimals = st.slider("Decimal places on chart labels & results", 0, 10, 3, key="reverse_cdf_decimals")
 
@@ -82,31 +80,35 @@ if uploaded:
         fmt = f"{{:.{decimals}e}}"
 
         # ------------------------------------------------------------------ #
-        # FINAL: Reverse CDF - Curve rises leftward, labels on X-axis below origin
+        # FINAL: Descending CDF - Labels BELOW X-axis, Ticks on LEFT
         # ------------------------------------------------------------------ #
         st.subheader("Descending CDF (Exceedance) - OOIP Only")
         fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
 
-        # Reverse both X and Y to make curve rise toward Y-axis (left)
+        # Plot: high → low from left to right, but we reverse X
         ax.plot(sorted_val[::-1], exceedance, color="#59a14f", lw=3)
 
         ax.set_title("Descending CDF")
         ax.set_xlabel(f"OOIP ({unit})")
         ax.set_ylabel("Exceedance Probability")
 
-        # Reverse X-axis: largest on LEFT, smallest on RIGHT
+        # Reverse X-axis: largest on LEFT
         ax.invert_xaxis()
 
         # Vertical lines
         for val, label, color in [(p90, "P90", "#e15759"), (p50, "P50", "#f28e2b"), (p10, "P10", "#59a14f")]:
             val_str = fmt.format(val)
             ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
-            # Label directly on X-axis, below the line
-            ax.text(val, -0.08, f"{label}: {val_str}", rotation=90, va='top', ha='center',
+            # Label BELOW X-axis
+            ax.text(val, -0.15, f"{label}: {val_str}", rotation=90, va='top', ha='center',
                     fontsize=9, color=color, transform=ax.get_xaxis_transform())
 
-        # Adjust layout to prevent label cutoff
-        plt.subplots_adjust(bottom=0.2)
+        # Move X-axis tick labels to LEFT side (origin)
+        ax.xaxis.set_label_position('top')
+        ax.xaxis.tick_top()
+
+        # Ensure space below for labels
+        plt.subplots_adjust(bottom=0.25, top=0.85)
 
         st.pyplot(fig)
 
@@ -421,21 +423,25 @@ if uploaded:
             buf2 = fig_to_png(fig2)
             st.download_button("Download Ascending CDF", buf2, "ascending_cdf.png", "image/png")
 
-            # FINAL: Descending CDF - rises leftward, labels on X-axis
+            # FINAL: Descending CDF - Labels BELOW, Ticks on TOP (left side)
             fig3, ax3 = plt.subplots(figsize=(8, 6), dpi=300)
             ax3.plot(sorted_val[::-1], exceedance, color="#59a14f", lw=3)
             ax3.set_title("Descending CDF")
             ax3.set_xlabel(f"STOIIP ({unit})")
             ax3.set_ylabel("Exceedance Probability")
-            ax3.invert_xaxis()  # Largest on left
+            ax3.invert_xaxis()  # Largest on LEFT
 
             for val, label, color in [(p90, "P90", "#e15759"), (p50, "P50", "#f28e2b"), (p10, "P10", "#59a14f")]:
                 val_str = f"{val:.{decimals}e}"
                 ax3.axvline(val, color=color, linestyle="--", linewidth=1.5)
-                ax3.text(val, -0.08, f"{label}: {val_str}", rotation=90, va='top', ha='center',
+                ax3.text(val, -0.15, f"{label}: {val_str}", rotation=90, va='top', ha='center',
                          fontsize=9, color=color, transform=ax3.get_xaxis_transform())
 
-            plt.subplots_adjust(bottom=0.2)
+            # Move tick labels to TOP (left side of axis)
+            ax3.xaxis.set_label_position('top')
+            ax3.xaxis.tick_top()
+
+            plt.subplots_adjust(bottom=0.25, top=0.85)
             st.pyplot(fig3)
             buf3 = fig_to_png(fig3)
             st.download_button("Download Descending CDF", buf3, "descending_cdf.png", "image/png")
