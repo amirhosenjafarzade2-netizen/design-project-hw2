@@ -20,7 +20,6 @@ mode = st.selectbox("Select Mode", ["Full Monte Carlo", "Reverse CDF Only"], ind
 # 1. Upload & parsing
 # ------------------------------------------------------------------ #
 uploaded = st.file_uploader("Upload reservoir data file (CSV or Excel)", type=["csv", "xlsx", "xls"])
-
 if uploaded:
     if uploaded.name.endswith(".csv"):
         raw = pd.read_csv(uploaded, header=None, dtype=str, na_filter=False)
@@ -32,7 +31,6 @@ if uploaded:
         if "porosity" in raw.iloc[i].astype(str).str.lower().values:
             header_row = i
             break
-
     if header_row is None:
         st.error("Could not find header row with 'Porosity'.")
         st.stop()
@@ -77,9 +75,7 @@ if uploaded:
         # Determine unit from filename or default
         unit = "STB" if "stb" in uploaded.name.lower() else "m³"
 
-        # ------------------------------------------------------------------ #
         # Ask for decimal places BEFORE plotting
-        # ------------------------------------------------------------------ #
         st.markdown("---")
         decimals = st.slider("Decimal places on chart labels & results", 0, 10, 3, key="reverse_cdf_decimals")
 
@@ -99,7 +95,7 @@ if uploaded:
         ax.set_xlabel(f"OOIP ({unit})")
         ax.set_ylabel("Exceedance Probability")
 
-        # Reverse X-axis: increasing from right to left
+        # Reverse X-axis (increases right to left)
         ax.invert_xaxis()
 
         # Add P10, P50, P90 lines and labels
@@ -108,11 +104,11 @@ if uploaded:
             ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
             ax.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
 
-        # Move scientific notation key (1eX) to bottom-left
-        offset_text = ax.xaxis.get_offset_text()
-        offset_text.set_horizontalalignment('left')
-        offset_text.set_x(0.01)
-        offset_text.set_y(-0.15)
+        # Scientific notation legend at bottom-left
+        ax.ticklabel_format(axis='x', style='sci', scilimits=(0,0))
+        ax.xaxis.get_offset_text().set_position((0.02, 0.02))  # Move 1eX to bottom-left
+        ax.xaxis.get_offset_text().set_horizontalalignment('left')
+        ax.xaxis.get_offset_text().set_fontsize(10)
 
         st.pyplot(fig)
 
@@ -180,7 +176,6 @@ if uploaded:
 
     porosity = np.clip(porosity, 0, 1)
     ntg = np.clip(ntg, 0, 1)
-
     st.success(f"File parsed — {len(porosity)} valid samples")
 
     col1, col2, col3 = st.columns(3)
@@ -255,7 +250,7 @@ if uploaded:
 
     st.markdown("**Gross Rock Volume (GRV) Distribution**")
     grv_dist = st.selectbox("Select GRV distribution", ["Uniform", "Triangular", "Normal"], index=0)
-    decimals = st.slider("Decimal places on charts & results", 0, 10, 3)  # Now 0–10
+    decimals = st.slider("Decimal places on charts & results", 0, 10, 3)
 
     # ------------------------------------------------------------------ #
     # 5. Run Simulation
@@ -296,7 +291,6 @@ if uploaded:
 
             net_vol = grv * ntg
             hc_vol = net_vol * phi * (1 - swi)
-_i)
             stoiip_m3 = hc_vol / bo
             stoiip = stoiip_m3 * (6.289811 if output_unit.startswith("Barrels") else 1)
             unit = "STB" if "Barrels" in output_unit else "m³"
@@ -321,7 +315,6 @@ _i)
         # --------------------------------------------------------------
         st.markdown("---")
         st.subheader("Example of One Random Realisation")
-
         example_rng = np.random.default_rng(42)
         phi_ex = np.clip(draw(phi_dist, porosity, 1, example_rng), 0.001, 0.99)[0]
         ntg_ex = np.clip(draw(ntg_dist, ntg, 1, example_rng), 0.001, 1.0)[0]
@@ -346,7 +339,6 @@ _i)
             rf"\;\times\;({1-swi:.4f})}}{{{bo:.4f}}}"
             rf"\;=\;{stoiip_ex:.{decimals}e}\;{unit}"
         )
-
         st.markdown(
             f"**Step-by-step calculation:**\n"
             f"- GRV = `{grv_ex:.2e}` m³\n"
@@ -366,7 +358,6 @@ _i)
         # ----------------------------------------------------------------
         st.markdown("---")
         st.subheader("STOIIP Distribution Analysis")
-
         sorted_val = np.sort(stoiip)
         cdf_y = np.linspace(0, 1, len(sorted_val))
         exceedance = 1 - cdf_y
@@ -435,15 +426,28 @@ _i)
             buf2 = fig_to_png(fig2)
             st.download_button("Download Ascending CDF", buf2, "ascending_cdf.png", "image/png")
 
+            # --- MODIFIED: Descending CDF with reversed X and bottom-left sci notation ---
             fig3, ax3 = plt.subplots(figsize=(8, 6), dpi=300)
             ax3.plot(sorted_val, exceedance, color="#59a14f", lw=3)
             ax3.set_title("Descending CDF")
             ax3.set_xlabel(f"STOIIP ({unit})")
             ax3.set_ylabel("Exceedance Probability")
+
+            # Reverse X-axis
+            ax3.invert_xaxis()
+
+            # Add P10, P50, P90
             for val, label, color in [(p10, "P10", "#59a14f"), (p50, "P50", "#f28e2b"), (p90, "P90", "#e15759")]:
                 val_str = f"{val:.{decimals}e}"
                 ax3.axvline(val, color=color, linestyle="--", linewidth=1.5)
                 ax3.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+
+            # Move 1eX to bottom-left
+            ax3.ticklabel_format(axis='x', style='sci', scilimits=(0,0))
+            ax3.xaxis.get_offset_text().set_position((0.02, 0.02))
+            ax3.xaxis.get_offset_text().set_horizontalalignment('left')
+            ax3.xaxis.get_offset_text().set_fontsize(10)
+
             st.pyplot(fig3)
             buf3 = fig_to_png(fig3)
             st.download_button("Download Descending CDF", buf3, "descending_cdf.png", "image/png")
