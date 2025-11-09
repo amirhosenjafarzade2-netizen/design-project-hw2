@@ -386,7 +386,7 @@ if uploaded:
                               annotation_text=f"{label}: {val_str}", row=1, col=2)
                 fig.add_vline(x=val, line=dict(dash="dash", color=color),
                               annotation_text=f"{label}: {val_str}",
-                              annotation_position="top", and x", row=2, col=1)
+                              annotation_position="top", row=2, col=1)
                 fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines',
                                         line=dict(dash='dash', color=color),
                                         name=f"{label}: {val_str} {unit}", showlegend=True))
