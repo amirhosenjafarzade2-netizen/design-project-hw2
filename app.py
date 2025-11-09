@@ -66,48 +66,50 @@ if uploaded:
 
         st.success(f"Loaded {len(ooip_values)} OOIP values from column '{header.iloc[ooip_col_idx]}'")
 
-        # Sort and compute exceedance
+        # Sort values ascending
         sorted_val = np.sort(ooip_values)
-        exceedance = 1 - np.linspace(0, 1, len(sorted_val))
+        exceedance = 1 - np.linspace(0, 1, len(sorted_val))  # P(exceedance)
 
-        # Determine unit from filename or default
+        # Determine unit
         unit = "STB" if "stb" in uploaded.name.lower() else "m³"
 
-        # Ask for decimal places BEFORE plotting
         st.markdown("---")
         decimals = st.slider("Decimal places on chart labels & results", 0, 10, 3, key="reverse_cdf_decimals")
 
-        # P10, P50, P90
         p10 = np.percentile(ooip_values, 10)
         p50 = np.percentile(ooip_values, 50)
         p90 = np.percentile(ooip_values, 90)
         fmt = f"{{:.{decimals}e}}"
 
         # ------------------------------------------------------------------ #
-        # FIXED: Matplotlib Descending CDF - X reversed, curve descending, labels at origin
+        # FINAL: Reverse CDF - Curve rises leftward, labels on X-axis below origin
         # ------------------------------------------------------------------ #
         st.subheader("Descending CDF (Exceedance) - OOIP Only")
         fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
-        
-        # Plot in correct order: high to low
-        ax.plot(sorted_val[::-1], exceedance[::-1], color="#59a14f", lw=3)
-        
+
+        # Reverse both X and Y to make curve rise toward Y-axis (left)
+        ax.plot(sorted_val[::-1], exceedance, color="#59a14f", lw=3)
+
         ax.set_title("Descending CDF")
         ax.set_xlabel(f"OOIP ({unit})")
         ax.set_ylabel("Exceedance Probability")
-        
-        # Reverse x-axis so high value is on left
+
+        # Reverse X-axis: largest on LEFT, smallest on RIGHT
         ax.invert_xaxis()
 
-        # Add P90 (left), P50, P10 (right) — text at origin (left of line)
+        # Vertical lines
         for val, label, color in [(p90, "P90", "#e15759"), (p50, "P50", "#f28e2b"), (p10, "P10", "#59a14f")]:
             val_str = fmt.format(val)
             ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
-            ax.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='left', fontsize=9, color=color, bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+            # Label directly on X-axis, below the line
+            ax.text(val, -0.08, f"{label}: {val_str}", rotation=90, va='top', ha='center',
+                    fontsize=9, color=color, transform=ax.get_xaxis_transform())
+
+        # Adjust layout to prevent label cutoff
+        plt.subplots_adjust(bottom=0.2)
 
         st.pyplot(fig)
 
-        # Download PNG
         def fig_to_png(f):
             buf = BytesIO()
             f.savefig(buf, format='png', dpi=300, bbox_inches='tight')
@@ -118,13 +120,12 @@ if uploaded:
         st.download_button("Download Descending CDF", buf, "descending_cdf_ooip.png", "image/png")
         plt.close(fig)
 
-        # Download OOIP values
         results_df = pd.DataFrame({"OOIP": ooip_values})
         st.download_button("Download OOIP Values", results_df.to_csv(index=False), "ooip_values.csv")
         st.stop()
 
     # ------------------------------------------------------------------ #
-    # MODE: Full Monte Carlo (Original Logic)
+    # MODE: Full Monte Carlo
     # ------------------------------------------------------------------ #
     col_map = {}
     for idx, name in enumerate(header_low):
@@ -385,7 +386,7 @@ if uploaded:
                               annotation_text=f"{label}: {val_str}", row=1, col=2)
                 fig.add_vline(x=val, line=dict(dash="dash", color=color),
                               annotation_text=f"{label}: {val_str}",
-                              annotation_position="top", row=2, col=1)
+                              annotation_position="top", and x", row=2, col=1)
                 fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines',
                                         line=dict(dash='dash', color=color),
                                         name=f"{label}: {val_str} {unit}", showlegend=True))
@@ -420,20 +421,21 @@ if uploaded:
             buf2 = fig_to_png(fig2)
             st.download_button("Download Ascending CDF", buf2, "ascending_cdf.png", "image/png")
 
-            # FIXED: Matplotlib Descending CDF - High on left, curve descending, labels at origin
+            # FINAL: Descending CDF - rises leftward, labels on X-axis
             fig3, ax3 = plt.subplots(figsize=(8, 6), dpi=300)
-            ax3.plot(sorted_val[::-1], exceedance[::-1], color="#59a14f", lw=3)
+            ax3.plot(sorted_val[::-1], exceedance, color="#59a14f", lw=3)
             ax3.set_title("Descending CDF")
             ax3.set_xlabel(f"STOIIP ({unit})")
             ax3.set_ylabel("Exceedance Probability")
-            ax3.invert_xaxis()  # High value on left
+            ax3.invert_xaxis()  # Largest on left
 
             for val, label, color in [(p90, "P90", "#e15759"), (p50, "P50", "#f28e2b"), (p10, "P10", "#59a14f")]:
                 val_str = f"{val:.{decimals}e}"
                 ax3.axvline(val, color=color, linestyle="--", linewidth=1.5)
-                ax3.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='left', fontsize=9, color=color,
-                         bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+                ax3.text(val, -0.08, f"{label}: {val_str}", rotation=90, va='top', ha='center',
+                         fontsize=9, color=color, transform=ax3.get_xaxis_transform())
 
+            plt.subplots_adjust(bottom=0.2)
             st.pyplot(fig3)
             buf3 = fig_to_png(fig3)
             st.download_button("Download Descending CDF", buf3, "descending_cdf.png", "image/png")
