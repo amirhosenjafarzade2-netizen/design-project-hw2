@@ -12,7 +12,7 @@ st.title("OOIP/STOIIP Monte Carlo Estimator")
 st.markdown("**Volumetric Hydrocarbon-in-Place Estimation Under Uncertainty**")
 
 # ------------------------------------------------------------------ #
-# NEW: Mode Selector
+# Mode Selector
 # ------------------------------------------------------------------ #
 mode = st.selectbox("Select Mode", ["Full Monte Carlo", "Reverse CDF Only"], index=0)
 
@@ -68,51 +68,49 @@ if uploaded:
 
         st.success(f"Loaded {len(ooip_values)} OOIP values from column '{header.iloc[ooip_col_idx]}'")
 
-        # Sort and compute exceedance
-        sorted_val = np.sort(ooip_values)
-        exceedance = 1 - np.linspace(0, 1, len(sorted_val))
+        # Sort descending for exceedance plot
+        sorted_val_desc = np.sort(ooip_values)[::-1]                 # NEW
+        exceedance = np.linspace(1, 0, len(sorted_val_desc))        # NEW
 
-        # Determine unit from filename or default
         unit = "STB" if "stb" in uploaded.name.lower() else "m³"
 
-        # Ask for decimal places BEFORE plotting
         st.markdown("---")
         decimals = st.slider("Decimal places on chart labels & results", 0, 10, 3, key="reverse_cdf_decimals")
 
-        # P10, P50, P90
         p10 = np.percentile(ooip_values, 10)
         p50 = np.percentile(ooip_values, 50)
         p90 = np.percentile(ooip_values, 90)
         fmt = f"{{:.{decimals}e}}"
 
-        # ------------------------------------------------------------------ #
-        # Matplotlib Descending CDF (Exceedance) Plot - MODIFIED
-        # ------------------------------------------------------------------ #
+        # ------------------- Matplotlib Descending CDF ------------------- #
         st.subheader("Descending CDF (Exceedance) - OOIP Only")
         fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
-        ax.plot(sorted_val, exceedance, color="#59a14f", lw=3)
+        ax.plot(sorted_val_desc, exceedance, color="#59a14f", lw=3)   # descending order
         ax.set_title("Descending CDF")
         ax.set_xlabel(f"OOIP ({unit})")
         ax.set_ylabel("Exceedance Probability")
 
-        # Reverse X-axis (increases right to left)
+        # Reverse X-axis (right to left)
         ax.invert_xaxis()
 
-        # Add P10, P50, P90 lines and labels
-        for val, label, color in [(p10, "P10", "#59a14f"), (p50, "P50", "#f28e2b"), (p90, "P90", "#e15759")]:
+        # P10 / P50 / P90
+        for val, label, color in [(p10, "P10", "#59a14f"),
+                                  (p50, "P50", "#f28e2b"),
+                                  (p90, "P90", "#e15759")]:
             val_str = fmt.format(val)
             ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
-            ax.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+            ax.text(val, 0.9, f"{label}: {val_str}", rotation=90,
+                    va='top', ha='right', fontsize=9, color=color)
 
-        # Scientific notation legend at bottom-left
+        # Scientific-notation offset to bottom-left
         ax.ticklabel_format(axis='x', style='sci', scilimits=(0,0))
-        ax.xaxis.get_offset_text().set_position((0.02, 0.02))  # Move 1eX to bottom-left
-        ax.xaxis.get_offset_text().set_horizontalalignment('left')
-        ax.xaxis.get_offset_text().set_fontsize(10)
+        offset_text = ax.xaxis.get_offset_text()
+        offset_text.set_position((0.02, 0.02))
+        offset_text.set_horizontalalignment('left')
+        offset_text.set_fontsize(10)
 
         st.pyplot(fig)
 
-        # Download PNG
         def fig_to_png(f):
             buf = BytesIO()
             f.savefig(buf, format='png', dpi=300, bbox_inches='tight')
@@ -123,28 +121,23 @@ if uploaded:
         st.download_button("Download Descending CDF", buf, "descending_cdf_ooip.png", "image/png")
         plt.close(fig)
 
-        # Download OOIP values
         results_df = pd.DataFrame({"OOIP": ooip_values})
         st.download_button("Download OOIP Values", results_df.to_csv(index=False), "ooip_values.csv")
         st.stop()
 
     # ------------------------------------------------------------------ #
-    # MODE: Full Monte Carlo (Original Logic)
+    # MODE: Full Monte Carlo
     # ------------------------------------------------------------------ #
     col_map = {}
     for idx, name in enumerate(header_low):
-        if "porosity" in name:
-            col_map["Porosity"] = idx
-        elif "permeability" in name:
-            col_map["Permeability_md"] = idx
-        elif "net" in name and "gross" in name:
-            col_map["NetToGross"] = idx
-        elif "gross volume" in name or "gross vol" in name or "gross volume m3" in name:
+        if "porosity" in name:                     col_map["Porosity"] = idx
+        elif "permeability" in name:               col_map["Permeability_md"] = idx
+        elif "net" in name and "gross" in name:    col_map["NetToGross"] = idx
+        elif any(k in name for k in ["gross volume", "gross vol", "gross volume m3"]):
             col_map["Gross_min"] = idx
             col_map["Gross_max"] = idx + 1
-        elif "swi" in name or "water" in name:
-            col_map["Swi"] = idx
-        elif "formation" in name or "fvf" in name or "bo" in name or "m3/sm3" in name:
+        elif "swi" in name or "water" in name:     col_map["Swi"] = idx
+        elif any(k in name for k in ["formation", "fvf", "bo", "m3/sm3"]):
             col_map["Bo"] = idx
 
     required = ["Porosity", "NetToGross", "Gross_min", "Gross_max", "Swi", "Bo"]
@@ -159,8 +152,10 @@ if uploaded:
         except:
             return np.nan
 
-    porosity = pd.to_numeric(data_rows.iloc[:, col_map["Porosity"]].apply(safe_float), errors='coerce').dropna().values
-    ntg = pd.to_numeric(data_rows.iloc[:, col_map["NetToGross"]].apply(safe_float), errors='coerce').dropna().values
+    porosity = pd.to_numeric(data_rows.iloc[:, col_map["Porosity"]].apply(safe_float),
+                             errors='coerce').dropna().values
+    ntg = pd.to_numeric(data_rows.iloc[:, col_map["NetToGross"]].apply(safe_float),
+                        errors='coerce').dropna().values
     gross_min = safe_float(data_rows.iloc[0, col_map["Gross_min"]])
     gross_max = safe_float(data_rows.iloc[0, col_map["Gross_max"]])
     swi = safe_float(meta_row.iloc[col_map["Swi"]])
@@ -195,7 +190,7 @@ if uploaded:
 
     def detect_distribution(samples, name):
         if len(samples) < 15:
-            return "Triangular", "Too few samples → using Triangular"
+            return "Triangular", "Too few samples to using Triangular"
         tests = {}
         try:
             _, p_norm = stats.shapiro(samples)
@@ -225,7 +220,7 @@ if uploaded:
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown(f"**Porosity (ϕ):** `{phi_dist}` \n_{phi_reason}_")
+        st.markdown(f"**Porosity (phi):** `{phi_dist}` \n_{phi_reason}_")
     with col2:
         st.markdown(f"**Net-to-Gross (N/G):** `{ntg_dist}` \n_{ntg_reason}_")
 
@@ -343,13 +338,13 @@ if uploaded:
             f"**Step-by-step calculation:**\n"
             f"- GRV = `{grv_ex:.2e}` m³\n"
             f"- N/G = `{ntg_ex:.4f}`\n"
-            f"- ϕ = `{phi_ex:.4f}`\n"
+            f"- phi = `{phi_ex:.4f}`\n"
             f"- (1 - S<sub>wi</sub>) = `{1-swi:.4f}`\n"
             f"- B<sub>o</sub> = `{bo:.4f}`\n\n"
-            f"1. Net volume = {grv_ex:.2e} × {ntg_ex:.4f} = **{net_vol_ex:.2e}** m³\n"
-            f"2. HC volume = {net_vol_ex:.2e} × {phi_ex:.4f} × {1-swi:.4f} = **{hc_vol_ex:.2e}** m³\n"
+            f"1. Net volume = {grv_ex:.2e} x {ntg_ex:.4f} = **{net_vol_ex:.2e}** m³\n"
+            f"2. HC volume = {net_vol_ex:.2e} x {phi_ex:.4f} x {1-swi:.4f} = **{hc_vol_ex:.2e}** m³\n"
             f"3. STOIIP (m³) = {hc_vol_ex:.2e} / {bo:.4f} = **{stoiip_m3_ex:.2e}** m³\n"
-            f"4. STOIIP ({unit}) = {stoiip_m3_ex:.2e} × {6.289811 if 'Barrels' in output_unit else 1:.6f} = **{stoiip_ex:.{decimals}e}** {unit}",
+            f"4. STOIIP ({unit}) = {stoiip_m3_ex:.2e} x {6.289811 if 'Barrels' in output_unit else 1:.6f} = **{stoiip_ex:.{decimals}e}** {unit}",
             unsafe_allow_html=True
         )
 
@@ -361,6 +356,10 @@ if uploaded:
         sorted_val = np.sort(stoiip)
         cdf_y = np.linspace(0, 1, len(sorted_val))
         exceedance = 1 - cdf_y
+
+        # For descending plot we need values in descending order
+        sorted_desc = sorted_val[::-1]                     # NEW
+        exceedance_desc = np.linspace(1, 0, len(sorted_desc))   # NEW
 
         def fig_to_png(fig):
             buf = BytesIO()
@@ -379,12 +378,18 @@ if uploaded:
                 ),
                 vertical_spacing=0.15
             )
-            fig.add_trace(go.Histogram(x=stoiip, nbinsx=80, name="STOIIP", marker_color="#4e79a7", showlegend=False), row=1, col=1)
-            fig.add_trace(go.Scatter(x=sorted_val, y=cdf_y, mode="lines", line=dict(color="#f28e2b", width=3), showlegend=False), row=1, col=2)
-            fig.add_trace(go.Scatter(x=sorted_val, y=exceedance, mode="lines", line=dict(color="#59a14f", width=3), name="Exceedance", showlegend=False), row=2, col=1)
-            fig.add_trace(go.Histogram(x=stoiip, nbinsx=80, name="Log", marker_color="#e15759", showlegend=False), row=2, col=2)
+            fig.add_trace(go.Histogram(x=stoiip, nbinsx=80, name="STOIIP",
+                                       marker_color="#4e79a7", showlegend=False), row=1, col=1)
+            fig.add_trace(go.Scatter(x=sorted_val, y=cdf_y, mode="lines",
+                                     line=dict(color="#f28e2b", width=3), showlegend=False), row=1, col=2)
+            fig.add_trace(go.Scatter(x=sorted_val, y=exceedance, mode="lines",
+                                     line=dict(color="#59a14f", width=3), showlegend=False), row=2, col=1)
+            fig.add_trace(go.Histogram(x=stoiip, nbinsx=80, name="Log",
+                                       marker_color="#e15759", showlegend=False), row=2, col=2)
 
-            for val, label, color in [(p10, "P10", "#59a14f"), (p50, "P50", "#f28e2b"), (p90, "P90", "#e15759")]:
+            for val, label, color in [(p10, "P10", "#59a14f"),
+                                      (p50, "P50", "#f28e2b"),
+                                      (p90, "P90", "#e15759")]:
                 val_str = fmt.format(val)
                 fig.add_vline(x=val, line=dict(dash="dash", color=color),
                               annotation_text=f"{label}: {val_str}", row=1, col=2)
@@ -396,39 +401,43 @@ if uploaded:
                                         name=f"{label}: {val_str} {unit}", showlegend=True))
 
             fig.update_layout(height=900,
-                              legend=dict(orientation="h", yanchor="top", y=-0.05, xanchor="left", x=0.0,
-                                          bgcolor="rgba(255,255,255,0.8)", bordercolor="black", borderwidth=1))
+                              legend=dict(orientation="h", yanchor="top", y=-0.05,
+                                          xanchor="left", x=0.0,
+                                          bgcolor="rgba(255,255,255,0.8)",
+                                          bordercolor="black", borderwidth=1))
             fig.update_xaxes(tickformat=f".{decimals}e")
             fig.update_xaxes(type="log", row=2, col=2)
             st.plotly_chart(fig, use_container_width=True)
 
         else:
-            # Matplotlib plots
+            # ---- Histogram -------------------------------------------------
             fig1, ax1 = plt.subplots(figsize=(8, 6), dpi=300)
             ax1.hist(stoiip, bins=80, color="#4e79a7", edgecolor="black")
             ax1.set_title("Histogram")
             ax1.set_xlabel(f"STOIIP ({unit})")
             ax1.set_ylabel("Frequency")
             st.pyplot(fig1)
-            buf1 = fig_to_png(fig1)
-            st.download_button("Download Histogram", buf1, "histogram.png", "image/png")
+            st.download_button("Download Histogram", fig_to_png(fig1), "histogram.png", "image/png")
 
+            # ---- Ascending CDF --------------------------------------------
             fig2, ax2 = plt.subplots(figsize=(8, 6), dpi=300)
             ax2.plot(sorted_val, cdf_y, color="#f28e2b", lw=3)
             ax2.set_title("Ascending CDF")
             ax2.set_xlabel(f"STOIIP ({unit})")
             ax2.set_ylabel("Cumulative Probability")
-            for val, label, color in [(p10, "P10", "#59a14f"), (p50, "P50", "#f28e2b"), (p90, "P90", "#e15759")]:
+            for val, label, color in [(p10, "P10", "#59a14f"),
+                                      (p50, "P50", "#f28e2b"),
+                                      (p90, "P90", "#e15759")]:
                 val_str = f"{val:.{decimals}e}"
                 ax2.axvline(val, color=color, linestyle="--", linewidth=1.5)
-                ax2.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+                ax2.text(val, 0.9, f"{label}: {val_str}", rotation=90,
+                         va='top', ha='right', fontsize=9, color=color)
             st.pyplot(fig2)
-            buf2 = fig_to_png(fig2)
-            st.download_button("Download Ascending CDF", buf2, "ascending_cdf.png", "image/png")
+            st.download_button("Download Ascending CDF", fig_to_png(fig2), "ascending_cdf.png", "image/png")
 
-            # --- MODIFIED: Descending CDF with reversed X and bottom-left sci notation ---
+            # ---- Descending CDF (MODIFIED) --------------------------------
             fig3, ax3 = plt.subplots(figsize=(8, 6), dpi=300)
-            ax3.plot(sorted_val, exceedance, color="#59a14f", lw=3)
+            ax3.plot(sorted_desc, exceedance_desc, color="#59a14f", lw=3)   # descending order
             ax3.set_title("Descending CDF")
             ax3.set_xlabel(f"STOIIP ({unit})")
             ax3.set_ylabel("Exceedance Probability")
@@ -436,30 +445,33 @@ if uploaded:
             # Reverse X-axis
             ax3.invert_xaxis()
 
-            # Add P10, P50, P90
-            for val, label, color in [(p10, "P10", "#59a14f"), (p50, "P50", "#f28e2b"), (p90, "P90", "#e15759")]:
+            # P-lines
+            for val, label, color in [(p10, "P10", "#59a14f"),
+                                      (p50, "P50", "#f28e2b"),
+                                      (p90, "P90", "#e15759")]:
                 val_str = f"{val:.{decimals}e}"
                 ax3.axvline(val, color=color, linestyle="--", linewidth=1.5)
-                ax3.text(val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
+                ax3.text(val, 0.9, f"{label}: {val_str}", rotation=90,
+                         va='top', ha='right', fontsize=9, color=color)
 
             # Move 1eX to bottom-left
             ax3.ticklabel_format(axis='x', style='sci', scilimits=(0,0))
-            ax3.xaxis.get_offset_text().set_position((0.02, 0.02))
-            ax3.xaxis.get_offset_text().set_horizontalalignment('left')
-            ax3.xaxis.get_offset_text().set_fontsize(10)
+            offset = ax3.xaxis.get_offset_text()
+            offset.set_position((0.02, 0.02))
+            offset.set_horizontalalignment('left')
+            offset.set_fontsize(10)
 
             st.pyplot(fig3)
-            buf3 = fig_to_png(fig3)
-            st.download_button("Download Descending CDF", buf3, "descending_cdf.png", "image/png")
+            st.download_button("Download Descending CDF", fig_to_png(fig3), "descending_cdf.png", "image/png")
 
+            # ---- Log-Scale Histogram --------------------------------------
             fig4, ax4 = plt.subplots(figsize=(8, 6), dpi=300)
             ax4.hist(stoiip, bins=80, color="#e15759", edgecolor="black", log=True)
             ax4.set_title("Log-Scale Histogram")
             ax4.set_xlabel(f"STOIIP ({unit})")
             ax4.set_xscale("log")
             st.pyplot(fig4)
-            buf4 = fig_to_png(fig4)
-            st.download_button("Download Log Histogram", buf4, "log_histogram.png", "image/png")
+            st.download_button("Download Log Histogram", fig_to_png(fig4), "log_histogram.png", "image/png")
 
             plt.close('all')
 
@@ -477,7 +489,7 @@ if uploaded:
 P10 (Low): {fmt.format(p10)} {unit}
 P50 (Median): {fmt.format(p50)} {unit}
 P90 (High): {fmt.format(p90)} {unit}
-ϕ ~ {phi_dist} | N/G ~ {ntg_dist} | GRV ~ {grv_dist}
+phi ~ {phi_dist} | N/G ~ {ntg_dist} | GRV ~ {grv_dist}
 Iterations: {iterations:,}
 """, "summary.txt")
 
