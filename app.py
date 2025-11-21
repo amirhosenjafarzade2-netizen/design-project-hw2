@@ -82,8 +82,8 @@ if uploaded:
         p90 = np.percentile(ooip_values, 90)
         fmt = f"{{:.{decimals}e}}"
 
-        # ------------------- Matplotlib Descending CDF ------------------- #
-       st.subheader("Descending CDF (Exceedance) - OOIP Only")
+                # ------------------- Matplotlib Descending CDF (Exceedance) - Fixed orientation ------------------- #
+        st.subheader("Descending CDF (Exceedance) - OOIP Only")
         fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
 
         # Use ascending-sorted values but plot against exceedance probability (1-CDF)
