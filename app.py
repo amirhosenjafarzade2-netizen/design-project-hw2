@@ -82,41 +82,55 @@ if uploaded:
         p90 = np.percentile(ooip_values, 90)
         fmt = f"{{:.{decimals}e}}"
 
-                        # ------------------- Matplotlib Descending CDF ------------------- #
-        st.subheader("Descending CDF (Exceedance) - OOIP Only")
-        fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
-        ax.plot(sorted_val_desc, exceedance, color="#59a14f", lw=3) # descending order
-        ax.set_title("Descending CDF")
-        ax.set_xlabel(f"OOIP ({unit})")
-        ax.set_ylabel("Exceedance Probability")
-        # Reverse X-axis (right to left)
-        ax.invert_xaxis()
-        # P10 / P50 / P90
-        for val, label, color in [(p10, "P10", "#59a14f"),
-                                  (p50, "P50", "#f28e2b"),
-                                  (p90, "P90", "#e15759")]:
-            val_str = fmt.format(val)
-            ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
-            ax.text(val, 0.9, f"{label}: {val_str}", rotation=90,
-                    va='top', ha='right', fontsize=9, color=color)
-        # Scientific-notation offset to bottom-left
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0,0))
-        offset_text = ax.xaxis.get_offset_text()
-        offset_text.set_position((0.02, 0.02))
-        offset_text.set_horizontalalignment('left')
-        offset_text.set_fontsize(10)
-        st.pyplot(fig)
-        def fig_to_png(f):
-            buf = BytesIO()
-            f.savefig(buf, format='png', dpi=300, bbox_inches='tight')
-            buf.seek(0)
-            return buf
-        buf = fig_to_png(fig)
-        st.download_button("Download Descending CDF", buf, "descending_cdf_ooip.png", "image/png")
-        plt.close(fig)
-        results_df = pd.DataFrame({"OOIP": ooip_values})
-        st.download_button("Download OOIP Values", results_df.to_csv(index=False), "ooip_values.csv")
-        st.stop()
+                       # ------------------- Matplotlib Descending CDF ------------------- #
+st.subheader("Descending CDF (Exceedance) - OOIP Only")
+fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
+ax.plot(sorted_val_desc, exceedance, color="#59a14f", lw=3)  # descending order
+ax.set_title("Descending CDF")
+ax.set_xlabel(f"OOIP ({unit})")
+ax.set_ylabel("Exceedance Probability")
+
+# Reverse X-axis (right to left)
+ax.invert_xaxis()
+
+# P10 / P50 / P90
+for val, label, color in [
+    (p10, "P10", "#59a14f"),
+    (p50, "P50", "#f28e2b"),
+    (p90, "P90", "#e15759")
+]:
+    val_str = fmt.format(val)
+    ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
+    ax.text(
+        val, 0.9, f"{label}: {val_str}", rotation=90,
+        va='top', ha='right', fontsize=9, color=color
+    )
+
+# Scientific-notation offset to bottom-left
+ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+offset_text = ax.xaxis.get_offset_text()
+offset_text.set_position((0.02, 0.02))
+offset_text.set_horizontalalignment('left')
+offset_text.set_fontsize(10)
+
+st.pyplot(fig)
+
+def fig_to_png(f):
+    buf = BytesIO()
+    f.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+    buf.seek(0)
+    return buf
+
+buf = fig_to_png(fig)
+st.download_button("Download Descending CDF", buf, "descending_cdf_ooip.png", "image/png")
+
+plt.close(fig)
+
+results_df = pd.DataFrame({"OOIP": ooip_values})
+st.download_button("Download OOIP Values", results_df.to_csv(index=False), "ooip_values.csv")
+
+st.stop()
+
     # ------------------------------------------------------------------ #
     # MODE: Full Monte Carlo
     # ------------------------------------------------------------------ #
