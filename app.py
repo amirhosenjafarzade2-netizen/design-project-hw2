@@ -96,9 +96,9 @@ if uploaded:
 
         # P10 / P50 / P90
         for val, label, color in [
-            (p10, "P10", "#59a14f"),
+            (p10, "P90", "#59a14f"),
             (p50, "P50", "#f28e2b"),
-            (p90, "P90", "#e15759")
+            (p90, "P10", "#e15759")
         ]:
             val_str = fmt.format(val)
             ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
