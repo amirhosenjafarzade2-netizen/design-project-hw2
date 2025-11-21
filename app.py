@@ -20,6 +20,7 @@ mode = st.selectbox("Select Mode", ["Full Monte Carlo", "Reverse CDF Only"], ind
 # 1. Upload & parsing
 # ------------------------------------------------------------------ #
 uploaded = st.file_uploader("Upload reservoir data file (CSV or Excel)", type=["csv", "xlsx", "xls"])
+
 if uploaded:
     if uploaded.name.endswith(".csv"):
         raw = pd.read_csv(uploaded, header=None, dtype=str, na_filter=False)
@@ -31,6 +32,7 @@ if uploaded:
         if "porosity" in raw.iloc[i].astype(str).str.lower().values:
             header_row = i
             break
+
     if header_row is None:
         st.error("Could not find header row with 'Porosity'.")
         st.stop()
@@ -62,6 +64,7 @@ if uploaded:
                 return np.nan
 
         ooip_values = pd.to_numeric(data_rows.iloc[:, ooip_col_idx].apply(safe_float), errors='coerce').dropna().values
+
         if len(ooip_values) == 0:
             st.error("No valid numeric OOIP values found.")
             st.stop()
@@ -69,9 +72,8 @@ if uploaded:
         st.success(f"Loaded {len(ooip_values)} OOIP values from column '{header.iloc[ooip_col_idx]}'")
 
         # Sort descending for exceedance plot
-        sorted_val_desc = np.sort(ooip_values)[::-1]                 # NEW
-        exceedance = np.linspace(1, 0, len(sorted_val_desc))        # NEW
-
+        sorted_val_desc = np.sort(ooip_values)[::-1]
+        exceedance = np.linspace(1, 0, len(sorted_val_desc))
         unit = "STB" if "stb" in uploaded.name.lower() else "m³"
 
         st.markdown("---")
@@ -82,67 +84,68 @@ if uploaded:
         p90 = np.percentile(ooip_values, 90)
         fmt = f"{{:.{decimals}e}}"
 
-                       # ------------------- Matplotlib Descending CDF ------------------- #
-st.subheader("Descending CDF (Exceedance) - OOIP Only")
-fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
-ax.plot(sorted_val_desc, exceedance, color="#59a14f", lw=3)  # descending order
-ax.set_title("Descending CDF")
-ax.set_xlabel(f"OOIP ({unit})")
-ax.set_ylabel("Exceedance Probability")
+        # ------------------- Matplotlib Descending CDF ------------------- #
+        st.subheader("Descending CDF (Exceedance) - OOIP Only")
+        fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
+        ax.plot(sorted_val_desc, exceedance, color="#59a14f", lw=3)  # descending order
+        ax.set_title("Descending CDF")
+        ax.set_xlabel(f"OOIP ({unit})")
+        ax.set_ylabel("Exceedance Probability")
+        # Reverse X-axis (right to left)
+        ax.invert_xaxis()
 
-# Reverse X-axis (right to left)
-ax.invert_xaxis()
+        # P10 / P50 / P90
+        for val, label, color in [
+            (p10, "P10", "#59a14f"),
+            (p50, "P50", "#f28e2b"),
+            (p90, "P90", "#e15759")
+        ]:
+            val_str = fmt.format(val)
+            ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
+            ax.text(
+                val, 0.9, f"{label}: {val_str}", rotation=90,
+                va='top', ha='right', fontsize=9, color=color
+            )
 
-# P10 / P50 / P90
-for val, label, color in [
-    (p10, "P10", "#59a14f"),
-    (p50, "P50", "#f28e2b"),
-    (p90, "P90", "#e15759")
-]:
-    val_str = fmt.format(val)
-    ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
-    ax.text(
-        val, 0.9, f"{label}: {val_str}", rotation=90,
-        va='top', ha='right', fontsize=9, color=color
-    )
+        # Scientific-notation offset to bottom-left
+        ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+        offset_text = ax.xaxis.get_offset_text()
+        offset_text.set_position((0.02, 0.02))
+        offset_text.set_horizontalalignment('left')
+        offset_text.set_fontsize(10)
 
-# Scientific-notation offset to bottom-left
-ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-offset_text = ax.xaxis.get_offset_text()
-offset_text.set_position((0.02, 0.02))
-offset_text.set_horizontalalignment('left')
-offset_text.set_fontsize(10)
+        st.pyplot(fig)
 
-st.pyplot(fig)
+        def fig_to_png(f):
+            buf = BytesIO()
+            f.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+            buf.seek(0)
+            return buf
 
-def fig_to_png(f):
-    buf = BytesIO()
-    f.savefig(buf, format='png', dpi=300, bbox_inches='tight')
-    buf.seek(0)
-    return buf
+        buf = fig_to_png(fig)
+        st.download_button("Download Descending CDF", buf, "descending_cdf_ooip.png", "image/png")
+        plt.close(fig)
 
-buf = fig_to_png(fig)
-st.download_button("Download Descending CDF", buf, "descending_cdf_ooip.png", "image/png")
-
-plt.close(fig)
-
-results_df = pd.DataFrame({"OOIP": ooip_values})
-st.download_button("Download OOIP Values", results_df.to_csv(index=False), "ooip_values.csv")
-
-st.stop()
+        results_df = pd.DataFrame({"OOIP": ooip_values})
+        st.download_button("Download OOIP Values", results_df.to_csv(index=False), "ooip_values.csv")
+        st.stop()
 
     # ------------------------------------------------------------------ #
     # MODE: Full Monte Carlo
     # ------------------------------------------------------------------ #
     col_map = {}
     for idx, name in enumerate(header_low):
-        if "porosity" in name:                     col_map["Porosity"] = idx
-        elif "permeability" in name:               col_map["Permeability_md"] = idx
-        elif "net" in name and "gross" in name:    col_map["NetToGross"] = idx
+        if "porosity" in name:
+            col_map["Porosity"] = idx
+        elif "permeability" in name:
+            col_map["Permeability_md"] = idx
+        elif "net" in name and "gross" in name:
+            col_map["NetToGross"] = idx
         elif any(k in name for k in ["gross volume", "gross vol", "gross volume m3"]):
             col_map["Gross_min"] = idx
             col_map["Gross_max"] = idx + 1
-        elif "swi" in name or "water" in name:     col_map["Swi"] = idx
+        elif "swi" in name or "water" in name:
+            col_map["Swi"] = idx
         elif any(k in name for k in ["formation", "fvf", "bo", "m3/sm3"]):
             col_map["Bo"] = idx
 
@@ -177,6 +180,7 @@ st.stop()
 
     porosity = np.clip(porosity, 0, 1)
     ntg = np.clip(ntg, 0, 1)
+
     st.success(f"File parsed — {len(porosity)} valid samples")
 
     col1, col2, col3 = st.columns(3)
@@ -197,24 +201,28 @@ st.stop()
     def detect_distribution(samples, name):
         if len(samples) < 15:
             return "Triangular", "Too few samples to using Triangular"
+
         tests = {}
         try:
             _, p_norm = stats.shapiro(samples)
             tests["Normal"] = p_norm
         except:
             tests["Normal"] = 0
+
         try:
             u = (samples - samples.min()) / (samples.max() - samples.min() + 1e-12)
             _, p_uni = stats.kstest(u, "uniform")
             tests["Uniform"] = p_uni
         except:
             tests["Uniform"] = 0
+
         try:
             c, loc, scale = stats.triang.fit(samples)
             _, p_tri = stats.kstest(samples, stats.triang.cdf, args=(c, loc, scale))
             tests["Triangular"] = p_tri
         except:
             tests["Triangular"] = 0
+
         best = max(tests, key=tests.get)
         reason = f"Best p-value: {tests[best]:.4f}"
         if best == "Triangular" and tests[best] < 0.05:
@@ -241,6 +249,7 @@ st.stop()
     # ------------------------------------------------------------------ #
     st.markdown("---")
     st.subheader("Simulation Settings")
+
     col1, col2, col3 = st.columns(3)
     with col1:
         iterations = st.slider("Monte Carlo iterations", 10000, 100000, 20000, 1000)
@@ -259,6 +268,7 @@ st.stop()
     if st.button("Run Monte Carlo Simulation", type="primary", use_container_width=True):
         with st.spinner("Simulating..."):
             rng = np.random.default_rng()
+
             gmin = gross_min
             gmax = gross_max
 
@@ -316,6 +326,7 @@ st.stop()
         # --------------------------------------------------------------
         st.markdown("---")
         st.subheader("Example of One Random Realisation")
+
         example_rng = np.random.default_rng(42)
         phi_ex = np.clip(draw(phi_dist, porosity, 1, example_rng), 0.001, 0.99)[0]
         ntg_ex = np.clip(draw(ntg_dist, ntg, 1, example_rng), 0.001, 1.0)[0]
@@ -340,6 +351,7 @@ st.stop()
             rf"\;\times\;({1-swi:.4f})}}{{{bo:.4f}}}"
             rf"\;=\;{stoiip_ex:.{decimals}e}\;{unit}"
         )
+
         st.markdown(
             f"**Step-by-step calculation:**\n"
             f"- GRV = `{grv_ex:.2e}` m³\n"
@@ -359,13 +371,12 @@ st.stop()
         # ----------------------------------------------------------------
         st.markdown("---")
         st.subheader("STOIIP Distribution Analysis")
+
         sorted_val = np.sort(stoiip)
         cdf_y = np.linspace(0, 1, len(sorted_val))
         exceedance = 1 - cdf_y
-
-        # For descending plot we need values in descending order
-        sorted_desc = sorted_val[::-1]                     # NEW
-        exceedance_desc = np.linspace(1, 0, len(sorted_desc))   # NEW
+        sorted_desc = sorted_val[::-1]
+        exceedance_desc = np.linspace(1, 0, len(sorted_desc))
 
         def fig_to_png(fig):
             buf = BytesIO()
@@ -414,7 +425,6 @@ st.stop()
             fig.update_xaxes(tickformat=f".{decimals}e")
             fig.update_xaxes(type="log", row=2, col=2)
             st.plotly_chart(fig, use_container_width=True)
-
         else:
             # ---- Histogram -------------------------------------------------
             fig1, ax1 = plt.subplots(figsize=(8, 6), dpi=300)
@@ -443,15 +453,12 @@ st.stop()
 
             # ---- Descending CDF (MODIFIED) --------------------------------
             fig3, ax3 = plt.subplots(figsize=(8, 6), dpi=300)
-            ax3.plot(sorted_desc, exceedance_desc, color="#59a14f", lw=3)   # descending order
+            ax3.plot(sorted_desc, exceedance_desc, color="#59a14f", lw=3)
             ax3.set_title("Descending CDF")
             ax3.set_xlabel(f"STOIIP ({unit})")
             ax3.set_ylabel("Exceedance Probability")
-
-            # Reverse X-axis
             ax3.invert_xaxis()
 
-            # P-lines
             for val, label, color in [(p10, "P10", "#59a14f"),
                                       (p50, "P50", "#f28e2b"),
                                       (p90, "P90", "#e15759")]:
@@ -460,7 +467,6 @@ st.stop()
                 ax3.text(val, 0.9, f"{label}: {val_str}", rotation=90,
                          va='top', ha='right', fontsize=9, color=color)
 
-            # Move 1eX to bottom-left
             ax3.ticklabel_format(axis='x', style='sci', scilimits=(0,0))
             offset = ax3.xaxis.get_offset_text()
             offset.set_position((0.02, 0.02))
@@ -498,6 +504,5 @@ P90 (High): {fmt.format(p90)} {unit}
 phi ~ {phi_dist} | N/G ~ {ntg_dist} | GRV ~ {grv_dist}
 Iterations: {iterations:,}
 """, "summary.txt")
-
 else:
     st.info("Upload your reservoir CSV/Excel file to begin.")
