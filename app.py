@@ -82,46 +82,41 @@ if uploaded:
         p90 = np.percentile(ooip_values, 90)
         fmt = f"{{:.{decimals}e}}"
 
-                        # ------------------- Matplotlib Descending CDF (Exceedance) - FIXED ------------------- #
-        st.subheader("Descending CDF (Exceedance) - OOIP Only")
-        fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
-
-        # Sort ascending (small values on the left)
-        sorted_asc = np.sort(ooip_values)
-        exceedance = np.linspace(1.0, 0.0, len(sorted_asc))
-
-        ax.plot(sorted_asc, exceedance, color="#59a14f", lw=3)
-        ax.set_title("Descending CDF (Exceedance Probability)")
-        ax.set_xlabel(f"OOIP ({unit})")
-        ax.set_ylabel("Exceedance Probability")
-
-        # NO invert_xaxis() → natural left → right direction
-
-        # P-lines - P90 on the left (low value), P10 on the right (high value)
-        for percentile_val, label, color in [
-            (p90, "P90", "#e15759"),   # smaller value → left
-            (p50, "P50", "#f28e2b"),
-            (p10, "P10", "#59a14f")    # larger value → right
-        ]:
-            val_str = fmt.format(percentile_val)
-            ax.axvline(percentile_val, color=color, linestyle="--", linewidth=1.5)
-            ax.text(percentile_val, 0.9, f"{label}: {val_str}",
-                    rotation=90, va='top', ha='right',
-                    fontsize=9, color=color,
-                    bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7, edgecolor="none"))  # very light background so it doesn't look like a triangle
-            # If you want ZERO background at all, just delete the bbox line above and use this instead:
-            # ax.text(percentile_val, 0.9, f"{label}: {val_str}", rotation=90, va='top', ha='right', fontsize=9, color=color)
-
-        # Scientific notation forced and placed bottom-left
-        ax.ticklabel_format(axis='x', style='sci', scilimits=(0,0))
-        offset_text = ax.xaxis.get_offset_text()
-        offset_text.set_position((0, 0))               # exact bottom-left corner
-        offset_text.set_horizontalalignment('left')
-        offset_text.set_verticalalignment('bottom')
-        offset_text.set_fontsize(10)
-
-        st.pyplot(fig)
-
+                        # ------------------- Matplotlib Descending CDF ------------------- #
+        st.subheader("Descending CDF (Exceedance) - OOIP Only")
+        fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
+        ax.plot(sorted_val_desc, exceedance, color="#59a14f", lw=3) # descending order
+        ax.set_title("Descending CDF")
+        ax.set_xlabel(f"OOIP ({unit})")
+        ax.set_ylabel("Exceedance Probability")
+        # Reverse X-axis (right to left)
+        ax.invert_xaxis()
+        # P10 / P50 / P90
+        for val, label, color in [(p10, "P10", "#59a14f"),
+                                  (p50, "P50", "#f28e2b"),
+                                  (p90, "P90", "#e15759")]:
+            val_str = fmt.format(val)
+            ax.axvline(val, color=color, linestyle="--", linewidth=1.5)
+            ax.text(val, 0.9, f"{label}: {val_str}", rotation=90,
+                    va='top', ha='right', fontsize=9, color=color)
+        # Scientific-notation offset to bottom-left
+        ax.ticklabel_format(axis='x', style='sci', scilimits=(0,0))
+        offset_text = ax.xaxis.get_offset_text()
+        offset_text.set_position((0.02, 0.02))
+        offset_text.set_horizontalalignment('left')
+        offset_text.set_fontsize(10)
+        st.pyplot(fig)
+        def fig_to_png(f):
+            buf = BytesIO()
+            f.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+            buf.seek(0)
+            return buf
+        buf = fig_to_png(fig)
+        st.download_button("Download Descending CDF", buf, "descending_cdf_ooip.png", "image/png")
+        plt.close(fig)
+        results_df = pd.DataFrame({"OOIP": ooip_values})
+        st.download_button("Download OOIP Values", results_df.to_csv(index=False), "ooip_values.csv")
+        st.stop()
     # ------------------------------------------------------------------ #
     # MODE: Full Monte Carlo
     # ------------------------------------------------------------------ #
